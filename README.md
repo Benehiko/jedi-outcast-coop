@@ -139,6 +139,21 @@ The `menudef.h` case is not cosmetic. Without those defines every
 symbolic constant in Jedi Outcast's `.menu` files fails to parse, and the
 client is dropped rather than merely rendering an ugly menu.
 
+## Debug builds
+
+`RelWithDebInfo` and `Release` both define `NDEBUG`, which compiles out
+`assert()`. The singleplayer save code carries assertions that Raven left
+as deliberate tripwires for exactly the change this project is making, so
+test anything touching saves against a `Debug` tree:
+
+    cmake -S openjk -B openjk/build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DBuildJK2SPEngine=ON -DBuildJK2SPGame=ON -DBuildJK2SPRdVanilla=ON
+    cmake --build openjk/build-debug
+
+Verify the assertions are live before trusting a passing test:
+
+    nm -u openjk/build-debug/codeJK2/game/jospgamex86_64.so | grep assert
+
 ## Development loop
 
 Gameplay code lives in `openjk/codeJK2/game/` and builds as a standalone

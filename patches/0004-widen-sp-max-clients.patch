@@ -1,0 +1,116 @@
+diff --git a/code/qcommon/q_shared.h b/code/qcommon/q_shared.h
+index 732b9025..50633626 100644
+--- a/code/qcommon/q_shared.h
++++ b/code/qcommon/q_shared.h
+@@ -615,7 +615,7 @@ typedef struct {
+ //
+ // per-level limits
+ //
+-#define	MAX_CLIENTS			1 // 128		// absolute limit
++#define	MAX_CLIENTS			2 // was 1; Raven's original was 128		// absolute limit
+ #define MAX_TERRAINS		1 //32
+ 
+ #define	GENTITYNUM_BITS		10		// don't need to send any more
+diff --git a/code/server/sv_client.cpp b/code/server/sv_client.cpp
+index 8e948c07..b3c1ff21 100644
+--- a/code/server/sv_client.cpp
++++ b/code/server/sv_client.cpp
+@@ -97,7 +97,7 @@ void SV_DirectConnect( netadr_t from ) {
+ 
+ 
+ 	newcl = NULL;
+-	for ( i = 0; i < 1 ; i++ ) {
++	for ( i = 0; i < MAX_CLIENTS ; i++ ) {
+ 		cl = &svs.clients[i];
+ 		if (cl->state == CS_FREE) {
+ 			newcl = cl;
+diff --git a/code/server/sv_game.cpp b/code/server/sv_game.cpp
+index 8cd596fb..db502674 100644
+--- a/code/server/sv_game.cpp
++++ b/code/server/sv_game.cpp
+@@ -1088,7 +1088,7 @@ void SV_InitGameProgs (void) {
+ 
+ 	// clear all gentity pointers that might still be set from
+ 	// a previous level
+-	for ( i = 0 ; i < 1 ; i++ ) {
++	for ( i = 0 ; i < MAX_CLIENTS ; i++ ) {
+ 		svs.clients[i].gentity = NULL;
+ 	}
+ }
+diff --git a/code/server/sv_init.cpp b/code/server/sv_init.cpp
+index c9dd4880..3ea0cf75 100644
+--- a/code/server/sv_init.cpp
++++ b/code/server/sv_init.cpp
+@@ -176,7 +176,7 @@ void SV_Startup( void ) {
+ 		Com_Error( ERR_FATAL, "SV_Startup: svs.initialized" );
+ 	}
+ 
+-	svs.clients = (struct client_s *) Z_Malloc ( sizeof(client_t) * 1, TAG_CLIENTS, qtrue );
++	svs.clients = (struct client_s *) Z_Malloc ( sizeof(client_t) * MAX_CLIENTS, TAG_CLIENTS, qtrue );
+ 	svs.numSnapshotEntities = 2 * 4 * 64;
+ 	svs.initialized = qtrue;
+ 
+@@ -323,7 +323,7 @@ void SV_SpawnServer( const char *server, ForceReload_e eForceReload, qboolean bA
+ 	// create a baseline for more efficient communications
+ 	SV_CreateBaseline ();
+ 
+-	for (i=0 ; i<1 ; i++) {
++	for (i=0 ; i<MAX_CLIENTS ; i++) {
+ 		// clear all time counters, because we have reset sv.time
+ 		svs.clients[i].lastPacketTime = 0;
+ 		svs.clients[i].lastConnectTime = 0;
+diff --git a/code/server/sv_main.cpp b/code/server/sv_main.cpp
+index 88d41de1..3b60d687 100644
+--- a/code/server/sv_main.cpp
++++ b/code/server/sv_main.cpp
+@@ -192,7 +192,7 @@ void SVC_Status( netadr_t from ) {
+ 	status[0] = 0;
+ 	statusLength = 0;
+ 
+-	for (i=0 ; i < 1 ; i++) {
++	for (i=0 ; i < MAX_CLIENTS ; i++) {
+ 		cl = &svs.clients[i];
+ 		if ( cl->state >= CS_CONNECTED ) {
+ 			if ( cl->gentity && cl->gentity->client ) {
+@@ -226,7 +226,7 @@ static void SVC_Info( netadr_t from ) {
+ 	char	infostring[MAX_INFO_STRING];
+ 
+ 	count = 0;
+-	for ( i = 0 ; i < 1 ; i++ ) {
++	for ( i = 0 ; i < MAX_CLIENTS ; i++ ) {
+ 		if ( svs.clients[i].state >= CS_CONNECTED ) {
+ 			count++;
+ 		}
+@@ -242,7 +242,7 @@ static void SVC_Info( netadr_t from ) {
+ 	//Info_SetValueForKey( infostring, "hostname", sv_hostname->string );
+ 	Info_SetValueForKey( infostring, "mapname", sv_mapname->string );
+ 	Info_SetValueForKey( infostring, "clients", va("%i", count) );
+-	Info_SetValueForKey( infostring, "sv_maxclients", va("%i", 1) );
++	Info_SetValueForKey( infostring, "sv_maxclients", va("%i", MAX_CLIENTS) );
+ 
+ 	NET_OutOfBandPrint( NS_SERVER, from, "infoResponse\n%s", infostring );
+ }
+diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
+index 671b309a..d95b7873 100644
+--- a/codeJK2/game/g_main.cpp
++++ b/codeJK2/game/g_main.cpp
+@@ -651,12 +651,16 @@ void InitGame(  const char *mapname, const char *spawntarget, int checkSum, cons
+ 	globals.gentities = g_entities;
+ 	ClearAllInUse();
+ 	// initialize all clients for this game
+-	level.maxclients = 1;
++	level.maxclients = MAX_CLIENTS;
+ 	level.clients = (gclient_t *) G_Alloc( level.maxclients * sizeof(level.clients[0]) );
+ 	memset(level.clients, 0, level.maxclients * sizeof(level.clients[0]));
+ 
+-	// set client fields on player
+-	g_entities[0].client = level.clients;
++	// set client fields on the player entities; entity slots [0, MAX_CLIENTS)
++	// are reserved for clients, so these indices line up by construction
++	for ( int i = 0; i < level.maxclients; i++ )
++	{
++		g_entities[i].client = level.clients + i;
++	}
+ 
+ 	// always leave room for the max number of clients,
+ 	// even if they aren't all used, so numbers inside that
