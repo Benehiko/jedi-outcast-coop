@@ -210,10 +210,10 @@ index 79bc3336..1a4763c7 100644
  
 diff --git a/code/qcommon/net_ip.cpp b/code/qcommon/net_ip.cpp
 new file mode 100644
-index 00000000..423dad4a
+index 00000000..0f9a7ef8
 --- /dev/null
 +++ b/code/qcommon/net_ip.cpp
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,351 @@
 +/*
 +===========================================================================
 +UDP transport for the Jedi Outcast singleplayer engine.
@@ -229,8 +229,9 @@ index 00000000..423dad4a
 +proxying, broadcast scanning, and LAN-address heuristics are omitted, as
 +nothing in the singleplayer engine uses them.
 +
-+Loopback remains the default. A server that never opens a socket behaves
-+exactly as it did before.
++Networking is off unless net_enabled is set, so a plain singleplayer session
++opens no socket and behaves exactly as before. When enabled, the socket binds
++every interface by default (net_ip "0.0.0.0") so a LAN client can reach it.
 +===========================================================================
 +*/
 +
@@ -370,10 +371,14 @@ index 00000000..423dad4a
 +	int					newsocket;
 +	int					i = 1;
 +
-+	if ( net_interface && net_interface[0] ) {
++	// "localhost", "0.0.0.0" and the empty string all map to INADDR_ANY below.
++	// Say so, rather than echoing an interface name we do not bind to.
++	if ( net_interface && net_interface[0]
++		&& Q_stricmp( net_interface, "localhost" )
++		&& Q_stricmp( net_interface, "0.0.0.0" ) ) {
 +		Com_Printf( "Opening IP socket: %s:%i\n", net_interface, port );
 +	} else {
-+		Com_Printf( "Opening IP socket: 0.0.0.0:%i\n", port );
++		Com_Printf( "Opening IP socket: 0.0.0.0:%i (all interfaces)\n", port );
 +	}
 +
 +	if ( ( newsocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP ) ) == INVALID_SOCKET ) {
@@ -395,7 +400,9 @@ index 00000000..423dad4a
 +	memset( &address, 0, sizeof(address) );
 +	address.sin_family = AF_INET;
 +
-+	if ( !net_interface || !net_interface[0] || !Q_stricmp( net_interface, "localhost" ) ) {
++	if ( !net_interface || !net_interface[0]
++		|| !Q_stricmp( net_interface, "localhost" )
++		|| !Q_stricmp( net_interface, "0.0.0.0" ) ) {
 +		address.sin_addr.s_addr = INADDR_ANY;
 +	} else if ( !Sys_StringToSockaddr( net_interface, &address ) ) {
 +		close( newsocket );
@@ -433,6 +440,7 @@ index 00000000..423dad4a
 +	fromlen = sizeof( from );
 +	ret = recvfrom( ip_socket, (char *)net_message->data, net_message->maxsize, 0,
 +					(struct sockaddr *)&from, &fromlen );
++
 +
 +	if ( ret == SOCKET_ERROR ) {
 +		if ( errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNRESET ) {
@@ -545,7 +553,10 @@ index 00000000..423dad4a
 +*/
 +void NET_Init( void ) {
 +	net_enabled = Cvar_Get( "net_enabled", "0", CVAR_LATCH | CVAR_ARCHIVE );
-+	net_ip      = Cvar_Get( "net_ip",      "localhost", CVAR_LATCH );
++	// Bind every interface by default so a LAN client can reach the server.
++	// Set net_ip to a specific address to restrict it, or to "localhost" for
++	// loopback only.
++	net_ip      = Cvar_Get( "net_ip",      "0.0.0.0", CVAR_LATCH );
 +	net_port    = Cvar_Get( "net_port",    "29070", CVAR_LATCH );
 +
 +	if ( !net_enabled->integer ) {
