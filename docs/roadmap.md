@@ -20,7 +20,8 @@ those assets shipped with.
 | `MAX_CLIENTS = 2` | Done — 13 engine sites, 2 gamecode sites |
 | UDP transport | Done — binds a socket, sends and receives |
 | Server accepts a remote client | Done — `SV_DirectConnect` assigns slot 1 |
-| Client sends the connect packet | **Blocked** — see Phase 1 |
+| Client connects and receives a gamestate | Done — host logs `Kyle connected` |
+| Client survives its first snapshot | **Blocked** — the wire protocol does not serialise entities. See Phase 1 |
 | Two players in one world | Not started |
 | Two players fighting NPCs | Not started |
 
@@ -31,42 +32,120 @@ calendar: each phase is expected to be harder than the one above it.
 
 ## Phase 1 — Land the second client
 
-**The one blocker.** `CL_Connect_f` sets `cls.state = CA_CHALLENGING`, but
-the engine primes its own local client to `CA_PRIMED` during cgame
-initialisation (`code/client/cl_cgame.cpp:1419`). `CL_CheckForResend` only
-transmits while the state is between `CA_CONNECTING` and `CA_CHALLENGING`
-(`cl_main.cpp:536`), so the connect packet is never sent.
+> **The blocker named below was wrong.** Tracing `cls.state` through a live
+> connection showed the handshake already completes:
+>
+> ```
+> CL_Connect_f: entry state=1        (CA_DISCONNECTED)
+> CL_Connect_f: set CA_CHALLENGING, addr=127.0.0.1:29090
+> CL_Connect_f: after resend state=3 (CA_CHALLENGING — held)
+> cl_parse: gamestate received -> CA_LOADING
+> cl_cgame: -> CA_PRIMED
+> ```
+>
+> and the host logs `Kyle connected`. The `CA_PRIMED` observed earlier was a
+> *completed* connection misread as a stuck one. The real blocker is below.
 
-The singleplayer client assumes it is always attached to its own local
-server. A remote connection has to suppress or unwind that assumption.
+### The actual blocker: the wire protocol does not serialise entities
+
+The client connects, receives a gamestate, and segfaults on its first
+snapshot:
+
+```
+MSG_ReadEntity          msg.cpp:836
+CL_DeltaEntity          cl_parse.cpp:74
+CL_ParsePacketEntities  cl_parse.cpp:165   (oldframe = 0x0, first snapshot)
+CL_ParseSnapshot        cl_parse.cpp:271
+CL_ParseServerMessage   cl_parse.cpp:535
+Com_EventLoop           common.cpp:895
+```
+
+The cause is that Raven replaced entity serialisation with a shared-memory
+shortcut. The server writes an *index into its own array*:
+
+```c
+void MSG_WriteEntity( msg_t *msg, entityState_t *to, int removeNum ) {
+    ...
+    MSG_WriteLong( msg, to - svs.snapshotEntities );   // pointer arithmetic
+}
+
+void MSG_ReadEntity( msg_t *msg, entityState_t *to ) {
+    int index = MSG_ReadLong( msg );
+    *to = svs.snapshotEntities[index];                 // the SERVER's array
+}
+```
+
+`MSG_ReadEntity` is client-side code dereferencing `svs.snapshotEntities`.
+That is coherent only while client and server share a process. A remote
+client never allocates that array, so it is null, and the first snapshot
+faults.
+
+Neither function exists in the multiplayer tree. The singleplayer wire
+protocol is, in this respect, not a wire protocol.
+
+### What is present, and what is missing
+
+| Piece | Status |
+|---|---|
+| `MSG_WriteDeltaEntity` (`msg.cpp:721`) | Present, complete, unused |
+| `MSG_ReadDeltaEntity` (`msg.cpp:854`) | Present, complete, **no callers** |
+| `sv.svEntities[].baseline` | Present, populated at `sv_init.cpp:160` |
+| `cl.entityBaselines[]` | **Absent** — removed from `clientActive_t` |
+| Server emits `svc_baseline` | **Absent** — never sent |
+| Client parses `svc_baseline` | **`assert(0)`** at `cl_parse.cpp:412` |
+
+Both halves of baseline delta compression were removed, not merely
+bypassed. `CL_ParsePacketEntities` still has the correct three-case
+structure and still computes `newnum` and tracks `oldstate`; only
+`CL_DeltaEntity` was collapsed to ignore them.
 
 ### Tasks
 
-1. **Decide the mechanism.** Two candidates, and they differ in blast radius:
-   - Defer `CL_Connect_f` until after client initialisation completes, so it
-     runs against a settled state machine rather than racing it.
-   - Introduce a "client only" mode that skips the local-server attach
-     entirely, closer to how the multiplayer client starts.
+1. **Restore `cl.entityBaselines[MAX_GENTITIES]`** to `clientActive_t`
+   (`code/client/client.h`). The multiplayer tree has it at `client.h:150`.
+   Two commented-out references survive in `cl_cgame.cpp:245,251`.
 
-   The second is cleaner and larger. Prototype the first to learn what the
-   state machine actually does.
+2. **Emit `svc_baseline` from the server.** In the gamestate, as the
+   multiplayer tree does in `SV_SendClientGameState`.
 
-2. **Instrument before changing.** Probe `cls.state` transitions through
-   startup. The last two blockers in this project were found by reading a
-   live value, not by reading source. Do that first.
+3. **Parse `svc_baseline` on the client**, replacing the `assert(0)`.
 
-3. **Make the client send `connect`.** Success is a single line in the host
-   log: `SVC_DirectConnect`.
+4. **Reconcile `entityStateFields` with `entityState_t`.** Do this first;
+   it gates everything else. `MSG_WriteDeltaEntity` opens with
 
-4. **Complete the handshake.** `SV_DirectConnect` → `SV_SendClientGameState`
-   → `CL_ParseGamestate` → `CA_PRIMED` on the *remote* client. The netchan,
-   snapshot and usercmd machinery are all present and compiled; none of it
-   has ever run over a real socket in this engine.
+   ```c
+   assert( numFields + 1 == sizeof(*from)/4 );
+   ```
+
+   `entityStateFields` (`msg.cpp:518`) has 68 entries, one commented out, so
+   67 live. `sizeof(entityState_t)` is **252 bytes = 63 ints**, measured on
+   the built binary. The assertion wants 63 and would get 68.
+
+   The table is stale: it describes a struct that no longer exists. Because
+   `MSG_WriteDeltaEntity` has no callers today, nothing has ever executed
+   that assertion, and the rot went unnoticed. Every field in the table must
+   be checked against the current `entityState_t` before the function can be
+   trusted to serialise anything.
+
+5. **Swap the four call sites.** Server `SV_EmitPacketEntities`
+   (`sv_snapshot.cpp:96,104,112`) → `MSG_WriteDeltaEntity` with the three
+   cases: delta from `oldent`; new entity from
+   `&sv.svEntities[newnum].baseline` with `force`; removal with `to = NULL`.
+   Client `CL_DeltaEntity` (`cl_parse.cpp:74`) → `MSG_ReadDeltaEntity`,
+   taking `newnum` and `old` as parameters, matching
+   `codemp/client/cl_parse.cpp`.
+
+6. **Regression-test loopback singleplayer at every step.** The loopback
+   path uses these same functions. Breaking it is the main risk of this
+   change, and it is easy to miss because loopback would still work if the
+   index shortcut were left in place for local clients.
 
 ### Done when
 
-The host logs `ClientConnect: 1` and `ClientBegin: 1` for a second
-`openjo_sp` process, and both processes stay up.
+A second `openjo_sp` process connects, receives snapshots without
+crashing, and both processes stay up. The host already logs
+`Kyle connected`; the goal is for it to keep doing so past the first
+snapshot.
 
 ### Known hazards
 
@@ -74,6 +153,10 @@ The host logs `ClientConnect: 1` and `ClientBegin: 1` for a second
   clients. Two clients behind one address must not collide.
 - `svs.numSnapshotEntities` was widened to `MAX_CLIENTS * 4 * 64`. Whether
   `4` is the right backup factor for this engine is untested.
+- The `entityState_t` field table has already drifted (task 4). Any other
+  delta table — `playerStateFields` for `MSG_WriteDeltaPlayerstate` — may
+  have drifted too, though that one *is* called today and so is presumably
+  sound.
 
 ---
 
