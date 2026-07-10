@@ -22,9 +22,45 @@ those assets shipped with.
 | Server accepts a remote client | Done — `SV_DirectConnect` assigns slot 1 |
 | Client connects and receives a gamestate | Done — host logs `Kyle connected` |
 | Entity delta compression restored | Done — table + both delta functions enabled and correct |
-| Client survives its first snapshot | **Blocked** — baselines overflow the gamestate. See Phase 1 |
-| Two players in one world | Not started |
+| Client survives its first snapshot | Done — real field serialisation over the wire |
+| Second player spawns clear of the first | Done — `G_DisplaceSpawnOrigin` |
+| Second player visible in the host's world | **Done — confirmed on screen** |
+| Second client renders its own view | **Blocked** — it never loads the map. See below |
 | Two players fighting NPCs | Not started |
+
+### The remote client never loads the map
+
+Verified by probe, not inference. The handshake completes:
+
+    CL_PacketEvent: from=127.0.0.1:29090 cursize=19    oob=1 state=3   (CA_CHALLENGING)
+    CL_PacketEvent: from=127.0.0.1:29090 cursize=10884 oob=0 state=4   (CA_CONNECTED)
+
+`connectResponse` and the 10,884-byte gamestate both arrive and are accepted.
+`cls.state` advances to `CA_CONNECTED`, `CL_ParseGamestate` runs, and the
+process then prints nothing further. It stays alive, holds a GPU handle,
+spins a frame loop, and draws black.
+
+The cause is structural. `CL_InitCGame` reads `mapname` out of the gamestate
+and calls `CG_INIT`, but **nothing loads the BSP into the client's collision
+model**. In singleplayer `SV_SpawnServer` calls `CM_LoadMap` in the same
+process and the client simply uses it. A remote client has no server, so
+`CM_LoadMap` never runs.
+
+The multiplayer tree loads the map on the client from the `CS_SERVERINFO`
+mapname during `CL_SystemInfoChanged`. That is the fix, and it is the next
+task.
+
+### Entity fields are not round-tripping correctly
+
+Observed in play: a red/green/blue coordinate-axis gizmo is drawn where an
+entity should be, meaning the renderer fell back to an origin marker because
+`modelindex` arrived as zero or garbage. The second player renders correctly,
+so most fields survive; at least one does not.
+
+This is a defect in the restored `entityStateFields` table -- a wrong bit
+width, or a field whose order does not match the `JK2_MODE` struct. Compare
+each entry against `entityState_t` and against `codemp/qcommon/msg.cpp`.
+
 
 Everything below Phase 1 is unverified. Estimates are ordinal, not
 calendar: each phase is expected to be harder than the one above it.
