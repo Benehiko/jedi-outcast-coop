@@ -261,7 +261,7 @@ consequence of `misc_camera` being dropped and are therefore expected.
 Note this is one map of forty-five. The ~40-classname figure derived
 from the spawn tables remains the estimate for the campaign as a whole.
 
-### NPCs do not spawn — this is the real blocker
+### NPCs did not spawn — diagnosed and resolved
 
 The load test surfaced a problem that source reading did not:
 
@@ -270,29 +270,83 @@ The load test surfaced a problem that source reading did not:
     ERROR: Couldn't spawn NPC stormtrooper2
 
 The multiplayer tree contains the stormtrooper AI in full
-(`codemp/game/NPC_AI_Stormtrooper.c`, 2,779 lines). The code is present;
-instantiation fails. This is the second open question landing exactly
-where it was flagged: Jedi Outcast's NPC definition assets do not match
-what Jedi Academy's NPC stats code expects.
+(`codemp/game/NPC_AI_Stormtrooper.c`, 2,779 lines), so the code was
+present but instantiation failed.
 
-The consequence is that a campaign map will load and be walkable, but
-will be empty of enemies until the NPC asset layer is reconciled.
+The cause is a file location, not a format. Compare the two
+`NPC_LoadParms` implementations:
+
+| | Jedi Outcast (`codeJK2/game/NPC_stats.cpp:2223`) | Jedi Academy (`codemp/game/NPC_stats.c:3561`) |
+|---|---|---|
+| Base file | reads `ext_data/NPCs.cfg` | none — `NPC2.cfg` is commented out at `:3564` |
+| Extensions | appends `ext_data/*.npc` | appends `ext_data/NPCs/*.npc` |
+| Buffer | `NPCParms`, `MAX_NPC_DATA_SIZE` = `0x40000` | identical |
+| Parser | `NPC_ParseParms()` scans the buffer for a named block | identical |
+
+Both concatenate every source into one buffer and hand it to the same
+parser. The grammar (`Name { key value ... }`) and the key set are the
+same. Jedi Outcast ships its 78 NPC definitions as a single
+`ext_data/npcs.cfg` (38,637 bytes) inside `assets0.pk3`; Jedi Academy's
+multiplayer code never looks there.
+
+No translation is required. The file only needs to be relocated to
+`ext_data/NPCs/` and given a `.npc` extension. At 38 KB it is far
+within the 256 KB buffer, and Jedi Academy additionally runs
+`COM_Compress()` over each file before concatenating.
+
+`tools/build-coop-npcs-pk3.sh` extracts the file from the user's own
+retail installation and repackages it as `zzz-coop-npcs.pk3`. The `zzz-`
+prefix makes the archive sort after `assets5.pk3`, so it shadows the
+retail archives in the engine's search path. No proprietary asset is
+stored in this repository.
+
+### Result
+
+Re-running the same load test with the pk3 installed:
+
+| | Before | After |
+|---|---|---|
+| `Couldn't spawn NPC` errors | 8 | **0** |
+| Total error lines | 13 | 5 |
+
+No new errors were introduced. The five remaining are all
+`ref_tag ... has invalid target`, the cutscene camera focus entities
+orphaned by `misc_camera` having no spawn function — out of scope by
+design.
+
+`entitylist` on the running server confirms live enemies rather than
+silent absence: `NPC_Stormtrooper` at entity indices 111, 118, 176, 194
+and 195, with the renderer disk-loading Jedi Outcast's Ghoul2 skeletal
+model `models/players/stormtrooper/model.glm` under the Jedi Academy
+engine.
 
 ## Revised assessment
 
-The recommendation is unchanged — campaign on multiplayer remains
-substantially cheaper than widening singleplayer — but the risk has
-moved. The entity spawn table is a smaller problem than estimated. The
-NPC asset layer is a larger one, and it was invisible to code reading.
+The recommendation is unchanged, and both risks identified before the
+load test have now been retired. The entity spawn table is a smaller
+problem than estimated, and the NPC asset layer — which looked like the
+larger one — turned out to be a file copy.
 
 ## Proposed first milestone
 
-Two players spawn on a campaign map and can move around it together.
-ICARUS disabled, no saves, no enemies. This is now known to be
-achievable: the map loads, the server accepts eight clients, and the
-missing entities are non-fatal.
+Two players spawn on a campaign map, move around it together, and fight
+stormtroopers. ICARUS disabled, no saves.
 
-Enemies are a separate, subsequent milestone gated on diagnosing why
-`NPC_Spawn` rejects Jedi Outcast's NPC definitions. That investigation
-should start at `codemp/game/NPC_spawn.c` and the `.npc` files inside
-`assets0.pk3`.
+Every component of this is now demonstrated individually: the map loads,
+the server accepts eight clients, the missing entities are non-fatal,
+and the enemies spawn. What remains is to connect two clients and
+confirm they see each other and the NPCs.
+
+## Known remaining work
+
+- Approximately 40 singleplayer spawn functions to port for full prop
+  and pickup coverage across all 45 maps (14 classnames on
+  `kejim_post`). Non-fatal in the meantime.
+- Player spawn points: campaign maps carry `info_player_start`, not the
+  deathmatch spawn points multiplayer expects. Unverified.
+- ICARUS is present in the multiplayer tree and will attempt to run
+  `.ibi` scripts for entities carrying `script_targetname` or
+  `behaviorSet` keys. For the no-cutscenes goal these should be
+  suppressed.
+- Weapon and item pickups (`item_bacta`, `item_battery`,
+  `item_la_goggles`) have no multiplayer spawn function.

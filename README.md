@@ -58,6 +58,31 @@ Then:
 
     cd openjk/build && ./openjo_sp.x86_64 +map kejim_post
 
+## Cooperative campaign
+
+See [docs/coop-design.md](docs/coop-design.md) for the feasibility study.
+The campaign is hosted on the multiplayer tree, which retains ICARUS,
+the singleplayer AI roster, Ghoul2, and the saber system.
+
+Build the multiplayer targets by inverting the `BuildMP*` / `BuildJK2SP*`
+flags above. Note the two trees use *different* data directories:
+
+| Tree | Data directory | Gamecode module |
+|---|---|---|
+| Jedi Outcast singleplayer | `~/.local/share/openjo/base/` | `jospgamex86_64.so` |
+| Multiplayer | `~/.local/share/openjk/base/` | `jampgamex86_64.so`, `cgamex86_64.so`, `uix86_64.so` |
+
+Jedi Outcast's NPC definitions live where Jedi Academy's multiplayer code
+does not look for them. Generate the compatibility archive from your own
+retail installation:
+
+    tools/build-coop-npcs-pk3.sh "<steam>/Jedi Outcast/GameData/base"
+    cp zzz-coop-npcs.pk3 ~/.local/share/openjk/base/
+
+Then a campaign map loads on the multiplayer engine, with enemies:
+
+    cd openjk/build && ./openjkded.x86_64 +set dedicated 1 +set sv_pure 0 +map kejim_post
+
 ## Development loop
 
 Gameplay code lives in `openjk/codeJK2/game/` and builds as a standalone
