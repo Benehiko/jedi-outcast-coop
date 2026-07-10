@@ -144,9 +144,20 @@ So the game side of the shared library performs real server initialisation as
 part of its API entry point. Populating `gi` cannot be made to work without
 also standing up enough of `sv` to satisfy it, at which point it is a server.
 
-This settles the choice: the cgame must be split into its own library, as the
-multiplayer tree does. That is the next task and it is large -- 55 direct
-cross-calls between the JK2 SP game and cgame become a defined boundary.
+The conclusion drawn at the time -- that the cgame must be split into its
+own library -- did not survive investigation. Measurement showed the split
+is neither sufficient (the cgame reads server *state*, not just server
+functions: 849 `->gent` dereferences and 278 direct `g_entities`/`level.`
+reads, which a link boundary does not remove) nor necessary (the library
+can be dual-loaded by the client with a client-safe import table; its
+`g_entities`/`level` are static arrays, so the client's copy is valid
+zeroed memory). See
+[cgame-split-investigation.md](cgame-split-investigation.md) for the
+measurements and
+[implementation-plan.md](implementation-plan.md) for the handoff-ready
+plan that replaces the split: a new `GetCGameAPI` export, a client-safe
+`gi` table (configstrings backed by `cl.gameState`, lookup-only), and a
+crash-driven burn-down of the `gent` dereferences.
 
 ### Entity fields are not round-tripping correctly
 
