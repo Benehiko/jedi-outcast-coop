@@ -6,13 +6,16 @@ Read [cgame-split-investigation.md](cgame-split-investigation.md) first —
 it is the measurement basis for Workstream A and explains why the obvious
 approach (splitting the cgame into its own library) was rejected.
 
-**Goal recap.** Two players cooperatively playing Jedi Outcast campaign maps
-on Linux (Windows later), no cutscenes. Current state: a second client
-connects over UDP, spawns displaced from the host, moves, and replicates to
-the host's screen — but renders a black screen itself, because its
-client-game (cgame) module never runs. Making it run and render is
-Workstream A. Shipping the result legally on Linux and Windows is
-Workstream C.
+**Goal recap.** Up to four players cooperatively playing Jedi Outcast
+campaign maps on Linux (Windows later), no cutscenes. Hosting is enabled
+from the in-game menu; joining works both by automatic LAN discovery and
+by typing an IP:port. Current state: a second client connects over UDP,
+spawns displaced from the host, moves, and replicates to the host's
+screen — but renders a black screen itself, because its client-game
+(cgame) module never runs. Making it run and render is Workstream A.
+Shipping the result legally on Linux and Windows is Workstream C. The
+menu/discovery UX is Workstream D and the player-count raise is
+Workstream E.
 
 ---
 
@@ -355,6 +358,155 @@ scripts are the deliverable.
 C1 is independent of Workstream A and can land immediately (it packages
 what already works for the host, and the join launcher is ready for when
 A lands). C2.2 (CI) next, then C2.1 (winsock), then C3.
+
+---
+
+## Workstream D — co-op UX: in-game hosting, discovery, menu connect
+
+Today, hosting and joining both require command-line arguments. The target
+experience: the host loads a map normally, opens the menu, and enables
+co-op; joiners open the menu and either pick the host from an
+automatically discovered list or type an address. No terminal involved.
+
+### What already exists (verified in source)
+
+- **The server side of discovery is already there.** `SVC_Info`
+  (`code/server/sv_main.cpp:247`) answers a connectionless `getinfo` with
+  an `infoResponse` infostring carrying `protocol`, `mapname`, `clients`,
+  and `sv_maxclients`, and it echoes a challenge parameter to defeat
+  spoofed replies. `SV_ConnectionlessPacket` (`sv_main.cpp:277`) routes
+  `getinfo` to it. Nothing server-side is needed for D2 beyond adding a
+  couple of keys (hostname, a `game=jk2coop` marker for filtering).
+- **The client parses connectionless packets** — `CL_ConnectionlessPacket`
+  (`code/client/cl_main.cpp:616`) handles `challengeResponse` and
+  `connectResponse` but has **no `infoResponse` branch**; that is the gap.
+- **Broadcast transport works.** `net_ip.cpp` sets `SO_BROADCAST` and
+  `NetadrToSockadr` handles `NA_BROADCAST`.
+- **The SP UI is code-driven and in-engine.** `.menu` files (data) call
+  `uiScript` verbs dispatched by `UI_RunMenuScript`
+  (`code/ui/ui_main.cpp:895`). Because the UI lives inside the engine
+  binary — unlike MP's separate UI VM — new verbs can read engine state
+  (the discovered-server list, `cls.state`) directly. No trap plumbing.
+- **Late join already works.** `SV_DirectConnect` accepts a connection
+  into a running map — that is exactly how the two-client tests run now.
+
+### D1. "Enable co-op" from the in-game menu
+
+1. **Engine command `coop_host [maxplayers]`.** Hosting after load is
+   just: open the UDP socket on a running loopback game. Two wrinkles:
+   - `net_enabled`/`net_port` are `CVAR_LATCH` and only read in
+     `NET_Init` at startup (`net_ip.cpp:338`). Add a direct path: the
+     command sets the cvars and calls `NET_OpenIP` itself (add a
+     `NET_Restart`-style helper; `NET_Shutdown` + reopen).
+   - **Port choice.** `NET_OpenIP` already scans `net_port … net_port+9`
+     (29070–29079) until a bind succeeds — "a random port" should mean
+     *random within this known range*, not an OS-ephemeral port, because
+     discovery (D2) needs a finite set of ports to probe. A truly random
+     port would force a second, fixed-port discovery socket; not worth it
+     at LAN scale. Do not implement that unless the 10-port range proves
+     insufficient.
+2. **Menu surface.** Author an original `.menu` addition (a "Co-op" page
+   reachable from the in-game/pause menu) with: Host (with a max-players
+   selector, D1), the discovered-server list (D2), and a direct-connect
+   field (D3). Wire its `uiScript coopHost` verb in `UI_RunMenuScript` to
+   `Cbuf_AddText("coop_host …")`.
+   - **Licensing**: the `.menu` file must be written from scratch, not
+     copied from a retail menu. Our own file is our IP — it ships in a
+     repo-built overlay pk3 (e.g. `zz-coop-ui.pk3`) and, unlike anything
+     extracted from retail assets, **may be committed to the repo**.
+     Name it to sort after `assets5.pk3` so it shadows correctly.
+3. **Done when**: host starts a normal SP game, opens the menu, clicks
+   Host; a second machine's `connect <ip>:<port>` succeeds. No
+   command-line flags on the host.
+
+### D2. Automatic LAN discovery
+
+1. **Client scan command** (`cl_main.cpp`, new `CL_LocalServers_f`,
+   registered as `localservers`): send `getinfo <challenge>` as an
+   out-of-band broadcast (`255.255.255.255`) to each port 29070–29079,
+   twice, staggered. Reference implementation:
+   `codemp/client/cl_main.cpp` `CL_LocalServers_f`.
+2. **Response handler**: add an `infoResponse` branch to
+   `CL_ConnectionlessPacket` (`cl_main.cpp:616`) — verify the echoed
+   challenge, verify `protocol` matches `PROTOCOL_VERSION` and
+   `game=jk2coop`, then record `{address (from the packet source, so the
+   exact port is learned automatically), hostname, mapname, clients,
+   sv_maxclients}` into a small `cls.localServers[]` array (cap ~16,
+   dedupe by address). Reference: `CL_ServerInfoPacket` in the same
+   codemp file.
+3. **Server infostring additions**: patch `SVC_Info` to include
+   `hostname` (new `sv_hostname` cvar, default the player name) and
+   `game=jk2coop`, so stock JK2/JA servers on the LAN are never listed.
+4. **UI**: the Co-op menu's Join list calls `uiScript coopRefresh`
+   (→ `localservers`) and renders `cls.localServers` directly (the UI is
+   in-engine; a `feeder` in the `.menu` file bound to a new feeder ID is
+   the house pattern — see `UI_FeederItemText` in `ui_main.cpp`).
+   Selecting an entry runs `connect <address>`.
+5. **Done when**: with a host up (D1), a second machine opens Join and
+   sees the host listed with map name and player count within two
+   seconds, on a switch with no configuration; clicking it connects.
+
+### D3. Direct connect from the menu
+
+For non-broadcast networks (VPNs, WiFi client isolation, internet play):
+a text field in the same Co-op page bound to a new cvar
+(`ui_coopAddress`, archived so it persists), and a Connect button whose
+`uiScript coopConnect` runs `connect <ui_coopAddress>` — `CL_Connect_f`
+already exists (patch 0005) and accepts `host:port`. Done when typing an
+address and clicking Connect joins, including across subnets where
+discovery finds nothing.
+
+### Ordering and dependencies
+
+D's transport pieces (D1 command, D2 scan/response) touch none of
+Workstream A's files and can be built and tested **now** — a discovered,
+menu-joined client that still renders black is a perfectly good test.
+The menu polish is most valuable after A lands. Suggested: D1 engine
+command → D2 scan + handler (testable via console) → menu pages → D3.
+
+---
+
+## Workstream E — four co-op players
+
+Raise the cap from 2 to 4. Patch 0004 (`0004-widen-sp-max-clients.patch`)
+already converted every hardcoded single-player assumption it touched
+into `MAX_CLIENTS`-bound loops, so the mechanical change is one line —
+`#define MAX_CLIENTS 4` (`code/qcommon/q_shared.h:618`) — plus an audit
+of everything that scales with it:
+
+1. **Configstring layout shifts.** `CS_LIGHT_STYLES` is defined as
+   `CS_PLAYERS + MAX_CLIENTS` (`q_shared.h:702`): changing the constant
+   renumbers every configstring after it. Client and server are always
+   built from the same tree, so this is consistent — but it means a
+   2-client build and a 4-client build **cannot interoperate**. Bump
+   `PROTOCOL_VERSION` when raising the cap so mismatches are rejected at
+   connect instead of desyncing mysteriously.
+2. **Snapshot memory.** `svs.numSnapshotEntities = MAX_CLIENTS * 4 * 64`
+   scales automatically; the `4` backup factor is untested at 4 clients —
+   watch for snapshot-ring exhaustion warnings in a long session.
+3. **Spawn displacement.** `G_DisplaceSpawnOrigin` (patch 0008) searches
+   8 directions × 4 radii — comfortably enough free spots for 4 players;
+   verify all four actually spawn clear on `kejim_post` (which has a
+   single spawn point).
+4. **cgame arrays.** `clientinfo[MAX_CLIENTS]` (`cg_media.h:356`) and the
+   other four `MAX_CLIENTS` uses in `codeJK2/cgame/` scale automatically;
+   re-check any burn-down guards added in A5 that assumed clientNum ∈
+   {0,1}.
+5. **`sv_maxclients` as a real cvar** (promoted from roadmap Phase 4):
+   with the compile-time cap at 4, the host wants a runtime choice of
+   2–4 — this is the `maxplayers` selector in D1's Host menu. Loops stay
+   bounded by the cvar, allocations by `MAX_CLIENTS`.
+6. **Saves.** The save format holds one `GCLI` chunk (roadmap Phase 4);
+   at 4 clients the mismatch is 4×, not 2×. Saves remain out of scope
+   for co-op sessions until that task; the asserts in `g_savegame.cpp`
+   guard it (Debug build only — `NDEBUG` kills them in `RelWithDebInfo`).
+
+**Do this after Workstream A reaches M4 at 2 players.** Every A5 crash is
+easier to reason about with one remote client, and the cap raise is a
+one-line rebuild away once things are stable. Done when: four processes
+(one host + three joiners, at least one on another machine) complete a
+10-minute `kejim_post` firefight with no crash and no snapshot-ring
+warnings.
 
 ---
 

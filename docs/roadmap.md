@@ -443,8 +443,11 @@ Recording these so they are decisions, not omissions.
   that engine cannot display these assets. Two upstream bug fixes were
   salvaged from the attempt (`patches/0002`, `patches/0003`) and are worth
   submitting to OpenJK regardless.
-- **More than two players.** `MAX_CLIENTS` is a define; raising it further
-  is not expected to be interesting until two work.
+- **More than two players — deferred, no longer out of scope.** The goal
+  is now four (see
+  [implementation-plan.md](implementation-plan.md) Workstream E), but the
+  raise waits until two players are fully playable: `MAX_CLIENTS` is a
+  define and patch 0004 already made the loops scale with it.
 - **A Vulkan renderer.** The renderer sits behind Quake 3's `refexport_t`
   module boundary, so it remains a clean follow-on. Mesa's Zink driver
   (`MESA_LOADER_DRIVER_OVERRIDE=zink`) runs the existing OpenGL renderer on
