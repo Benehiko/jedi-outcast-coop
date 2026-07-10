@@ -1,7 +1,7 @@
 diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
 --- a/codeJK2/game/g_main.cpp
 +++ b/codeJK2/game/g_main.cpp
-@@ -826,6 +826,32 @@
+@@ -826,6 +826,42 @@
  	return &globals;
  }
  
@@ -29,6 +29,16 @@ diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
 +	gameinfo_import.Cvar_Create = G_Cvar_Create;
 +
 +	GI_Init( &gameinfo_import );
++
++	// The cgame resolves weapons and items against bg_itemlist, which InitGame
++	// fills from ext_data/items.dat. A dual-loaded client never runs InitGame,
++	// so load the item parms here too (client-safe: pure FS read + parse, no
++	// server state). Without this, CG_RegisterWeapon errors with "Couldn't
++	// find item for weapon ... Need to update Items.dat!". G_InitMemory must
++	// run first — the parser allocates strings through G_Alloc, which reads the
++	// g_debugalloc cvar that G_InitMemory registers.
++	G_InitMemory();
++	IT_LoadItemParms();
 +}
 +
  void QDECL G_Error( const char *fmt, ... ) {
