@@ -1,0 +1,141 @@
+diff --git a/code/client/cl_parse.cpp b/code/client/cl_parse.cpp
+index 81c702dc..6c0f0248 100644
+--- a/code/client/cl_parse.cpp
++++ b/code/client/cl_parse.cpp
+@@ -63,15 +63,33 @@ Parses deltas from the given base and adds the resulting entity
+ to the current frame
+ ==================
+ */
+-void CL_DeltaEntity (msg_t *msg, clSnapshot_t *frame)
++// Formerly called MSG_ReadEntity, which read an index into the *server's*
++// svs.snapshotEntities and dereferenced it -- valid only when client and server
++// share a process. MSG_ReadDeltaEntity parses the fields off the wire. It needs
++// the entity number, already read by the caller, and the state to delta from:
++// the matching entity in the previous frame, or a null state for one newly
++// visible, which SV_EmitPacketEntities sends in full. `unchanged` marks an
++// entity the server did not write at all; carry the old state forward rather
++// than consuming bytes that are not there.
++void CL_DeltaEntity (msg_t *msg, clSnapshot_t *frame, int newnum, entityState_t *old,
++					 qboolean unchanged)
+ {
+ 	entityState_t	*state;
++	entityState_t	nullEntityState;
+ 
+ 	// save the parsed entity state into the big circular buffer so
+ 	// it can be used as the source for a later delta
+ 	state = &cl.parseEntities[cl.parseEntitiesNum & (MAX_PARSE_ENTITIES-1)];
+ 
+-	MSG_ReadEntity( msg, state);
++	if ( unchanged ) {
++		*state = *old;
++	} else {
++		if ( !old ) {
++			memset( &nullEntityState, 0, sizeof( nullEntityState ) );
++			old = &nullEntityState;
++		}
++		MSG_ReadDeltaEntity( msg, old, state, newnum );
++	}
+ 
+ 	if ( state->number == (MAX_GENTITIES-1) ) {
+ 		return;		// entity was delta removed
+@@ -126,7 +144,7 @@ void CL_ParsePacketEntities( msg_t *msg, clSnapshot_t *oldframe, clSnapshot_t *n
+ 			if ( cl_shownet->integer == 3 ) {
+ 				Com_Printf ("%3i:  unchanged: %i\n", msg->readcount, oldnum);
+ 			}
+-			CL_DeltaEntity( msg, newframe );
++			CL_DeltaEntity( msg, newframe, oldnum, oldstate, qtrue );
+ 
+ 			oldindex++;
+ 
+@@ -143,7 +161,7 @@ void CL_ParsePacketEntities( msg_t *msg, clSnapshot_t *oldframe, clSnapshot_t *n
+ 			if ( cl_shownet->integer == 3 ) {
+ 				Com_Printf ("%3i:  delta: %i\n", msg->readcount, newnum);
+ 			}
+-			CL_DeltaEntity( msg, newframe );
++			CL_DeltaEntity( msg, newframe, newnum, oldstate, qfalse );
+ 
+ 			oldindex++;
+ 
+@@ -162,7 +180,7 @@ void CL_ParsePacketEntities( msg_t *msg, clSnapshot_t *oldframe, clSnapshot_t *n
+ 			if ( cl_shownet->integer == 3 ) {
+ 				Com_Printf ("%3i:  baseline: %i\n", msg->readcount, newnum);
+ 			}
+-			CL_DeltaEntity( msg, newframe );
++			CL_DeltaEntity( msg, newframe, newnum, NULL, qfalse );
+ 			continue;
+ 		}
+ 
+@@ -174,7 +192,7 @@ void CL_ParsePacketEntities( msg_t *msg, clSnapshot_t *oldframe, clSnapshot_t *n
+ 		if ( cl_shownet->integer == 3 ) {
+ 			Com_Printf ("%3i:  unchanged: %i\n", msg->readcount, oldnum);
+ 		}
+-		CL_DeltaEntity( msg, newframe );
++		CL_DeltaEntity( msg, newframe, oldnum, oldstate, qtrue );
+ 
+ 		oldindex++;
+ 
+diff --git a/code/server/sv_snapshot.cpp b/code/server/sv_snapshot.cpp
+index 149a0eb3..1d92767f 100644
+--- a/code/server/sv_snapshot.cpp
++++ b/code/server/sv_snapshot.cpp
+@@ -60,6 +60,9 @@ static void SV_EmitPacketEntities( clientSnapshot_t *from, clientSnapshot_t *to,
+ 	int		oldindex, newindex;
+ 	int		oldnum, newnum;
+ 	int		from_num_entities;
++	entityState_t	nullEntityState;
++
++	memset( &nullEntityState, 0, sizeof( nullEntityState ) );
+ 
+ 	// generate the delta update
+ 	if ( !from ) {
+@@ -89,19 +92,27 @@ static void SV_EmitPacketEntities( clientSnapshot_t *from, clientSnapshot_t *to,
+ 			oldnum = oldent->number;
+ 		}
+ 
++		// MSG_WriteEntity used to be called here. It wrote the entity's index
++		// into svs.snapshotEntities and let the client dereference the server's
++		// own array -- coherent only while client and server share a process.
++		// A remote client has no such array and faults on its first snapshot.
++		// MSG_WriteDeltaEntity serialises the fields themselves.
++		//
++		// A newly visible entity is delta'd from a null state rather than from
++		// sv.svEntities[].baseline, so the gamestate need not carry a baseline
++		// for every entity: kejim_post has enough entities that those overflow
++		// MAX_MSGLEN. The cost is a slightly larger first snapshot per entity.
+ 		if ( newnum == oldnum ) {
+ 			// delta update from old position
+-			// because the force parm is qfalse, this will not result
+-			// in any bytes being emited if the entity has not changed at all
+-			MSG_WriteEntity(msg, newent, 0);
++			MSG_WriteDeltaEntity( msg, oldent, newent, qfalse );
+ 			oldindex++;
+ 			newindex++;
+ 			continue;
+ 		}
+ 
+ 		if ( newnum < oldnum ) {
+-			// this is a new entity, send it from the baseline
+-			MSG_WriteEntity (msg, newent, 0);
++			// this is a new entity, send it in full
++			MSG_WriteDeltaEntity( msg, &nullEntityState, newent, qtrue );
+ 			newindex++;
+ 			continue;
+ 		}
+@@ -109,7 +120,7 @@ static void SV_EmitPacketEntities( clientSnapshot_t *from, clientSnapshot_t *to,
+ 		if ( newnum > oldnum ) {
+ 			// the old entity isn't present in the new message
+ 			if(oldent) {
+-				MSG_WriteEntity (msg, NULL, oldent->number);
++				MSG_WriteDeltaEntity( msg, oldent, NULL, qtrue );
+ 			}
+ 			oldindex++;
+ 			continue;
+@@ -706,7 +717,7 @@ void SV_SendClientMessages( void ) {
+ 	client_t	*c;
+ 
+ 	// send a message to each connected client
+-	for (i=0, c = svs.clients ; i < 1 ; i++, c++) {
++	for (i=0, c = svs.clients ; i < MAX_CLIENTS ; i++, c++) {
+ 		if (!c->state) {
+ 			continue;		// not connected
+ 		}
