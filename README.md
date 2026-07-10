@@ -21,7 +21,8 @@ never initialises without a local server. The fix is planned in
 | Document | What it is |
 |---|---|
 | [roadmap.md](docs/roadmap.md) | **Start here.** What happens next, in phases, with tasks |
-| [implementation-plan.md](docs/implementation-plan.md) | Handoff-ready plan: remote-client rendering (dual-load) + Linux/Windows installer |
+| [tasks.md](docs/tasks.md) | **Implementing? Start here.** The plan as ordered, sitting-sized tasks with done-checks |
+| [implementation-plan.md](docs/implementation-plan.md) | Handoff-ready plan: remote-client rendering (dual-load), co-op UX, four players, Linux/Windows installer |
 | [cgame-split-investigation.md](docs/cgame-split-investigation.md) | Why the cgame library split was rejected — measurements and the replacement design |
 | [widen-sp-progress.md](docs/widen-sp-progress.md) | What has been done on the current route |
 | [route-comparison.md](docs/route-comparison.md) | Why this route was chosen over hosting on the multiplayer tree |

@@ -2,6 +2,9 @@
 
 This is a handoff document. It assumes no prior context beyond being a C++
 developer; everything project-specific you need is either in here or linked.
+The executable version of this plan — ordered tasks with dependencies and
+done-checks — is [tasks.md](tasks.md); this document carries the design
+rationale and detail those tasks reference.
 Read [cgame-split-investigation.md](cgame-split-investigation.md) first —
 it is the measurement basis for Workstream A and explains why the obvious
 approach (splitting the cgame into its own library) was rejected.
