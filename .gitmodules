@@ -1,0 +1,3 @@
+[submodule "openjk"]
+	path = openjk
+	url = https://github.com/JACoders/OpenJK.git
