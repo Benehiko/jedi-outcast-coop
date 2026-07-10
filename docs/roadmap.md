@@ -21,7 +21,8 @@ those assets shipped with.
 | UDP transport | Done — binds a socket, sends and receives |
 | Server accepts a remote client | Done — `SV_DirectConnect` assigns slot 1 |
 | Client connects and receives a gamestate | Done — host logs `Kyle connected` |
-| Client survives its first snapshot | **Blocked** — the wire protocol does not serialise entities. See Phase 1 |
+| Entity delta compression restored | Done — table + both delta functions enabled and correct |
+| Client survives its first snapshot | **Blocked** — baselines overflow the gamestate. See Phase 1 |
 | Two players in one world | Not started |
 | Two players fighting NPCs | Not started |
 
@@ -87,8 +88,9 @@ protocol is, in this respect, not a wire protocol.
 
 | Piece | Status |
 |---|---|
-| `MSG_WriteDeltaEntity` (`msg.cpp:721`) | Present, complete, unused |
-| `MSG_ReadDeltaEntity` (`msg.cpp:854`) | Present, complete, **no callers** |
+| `entityStateFields` | **Done** — enabled, made `JK2_MODE`-conditional |
+| `MSG_WriteDeltaEntity` | **Done** — enabled; `numFields` assertion holds (62 vs 63) |
+| `MSG_ReadDeltaEntity` | **Done** — enabled |
 | `sv.svEntities[].baseline` | Present, populated at `sv_init.cpp:160` |
 | `cl.entityBaselines[]` | **Absent** — removed from `clientActive_t` |
 | Server emits `svc_baseline` | **Absent** — never sent |
@@ -139,6 +141,34 @@ structure and still computes `newnum` and tracks `oldstate`; only
    path uses these same functions. Breaking it is the main risk of this
    change, and it is easy to miss because loopback would still work if the
    index shortcut were left in place for local clients.
+
+### Blocker found while attempting tasks 1-3
+
+Emitting a `svc_baseline` for every entity with a baseline **overflows the
+gamestate message**. `kejim_post` has on the order of 900 live entities;
+`MAX_MSGLEN` is 17408 bytes. The server logs
+
+    WARNING: GameState overflowed for Kyle
+
+and the loopback ring — deliberately `<= MAX_MSGLEN`, with an `#error` in
+`net_chan.cpp` enforcing it — then smashes the stack in `NET_GetLoopPacket`.
+The unconditional free-space check added in task 4 turns that silent
+corruption into a clean `ERR_DROP`.
+
+Tasks 1-3 therefore cannot land as written. Options, unevaluated:
+
+- **Raise `MAX_MSGLEN`.** It is `1*17408`, with a commented-out `3*16384`
+  directly beneath, suggesting it was tuned once before. The loopback ring
+  must stay `<= MAX_MSGLEN`, and `Netchan_Transmit` already fragments
+  anything over `FRAGMENT_SIZE`.
+- **Send baselines across several messages**, as a reliable sequence before
+  the first snapshot.
+- **Send no baselines at all.** `SV_EmitPacketEntities` needs a `from` state
+  for a newly-visible entity; the multiplayer tree uses the baseline, but a
+  null state plus `force` would also serve, at the cost of a larger first
+  snapshot per entity.
+
+The third is the smallest change and should be measured first.
 
 ### Done when
 
