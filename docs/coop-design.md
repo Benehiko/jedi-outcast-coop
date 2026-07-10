@@ -196,12 +196,17 @@ progression machinery this project explicitly excludes.
 | | Widen singleplayer | Campaign on multiplayer |
 |---|---|---|
 | Netcode | Present, capped at one client | Already multiplayer |
-| `g_entities[0]` assumptions | ~200 sites to correct | Already multi-client |
-| NPC and AI | Present | Present |
+| `g_entities[0]` assumptions | ~200 sites to correct | Present in the AI too — see correction below |
+| NPC and AI | Present, works (runs the retail game) | Present, **partially ported, non-functional** |
 | ICARUS | Present | Present |
 | Ghoul2, saber | Present | Present |
 | Map format | Native | Identical (RBSP v1) |
-| Principal work | Client array, save format, PLAYERONLY triggers, AI aggro | ~40 spawn functions |
+| Principal work | Client array, save format, PLAYERONLY triggers, AI aggro | ~40 spawn functions, plus repairing the AI port |
+
+**This table was written before the multiplayer AI was tested.** The
+"NPC and AI: present" entry was inferred from file sizes. See the
+correction section below; the multiplayer AI does not acquire players as
+enemies, and the row is now known to be wrong.
 
 ## Recommendation
 
@@ -366,6 +371,83 @@ Campaign spawn points needed no work. `SP_info_player_start` aliases
 itself to `info_player_deathmatch` at `codemp/game/g_client.c:127-129`,
 so the multiplayer spawn selector handles campaign maps natively. The
 concern raised before the test was unfounded.
+
+## Correction: the multiplayer AI is a partial port
+
+The feasibility study above claims the multiplayer tree "contains the
+full singleplayer AI roster," citing roughly 23,685 lines across
+`NPC_AI_*.c`. The files are present. **Whether that code works was
+inferred from its size, not tested, and it does not work.**
+
+Observed, with two players standing point-blank in front of stormtroopers
+on `kejim_post`:
+
+- `NPC_Think` runs every frame. `d_npcfreeze` is 0 and `SVF_ICARUS_FREEZE`
+  is clear, so the NPCs are not frozen.
+- Their behavior state is `BS_DEFAULT` and their enemy is `-1`.
+- `NPC_ValidEnemy` is **never called for a player entity** — zero times
+  across 25 seconds of play.
+
+The NPCs are awake, ticking, and blind.
+
+Three hypotheses were raised and each was refuted by reading the source:
+
+| Hypothesis | Refuted by |
+|---|---|
+| Players are on the wrong NPC team | `NPC_ValidEnemy` maps FFA players to `NPCTEAM_PLAYER` when `level.gametype < GT_TEAM` (`NPC_utils.c`) |
+| NPCs are frozen awaiting an ICARUS script | `SVF_ICARUS_FREEZE` is only ever set by `g_ICARUScb.c:3320`, which never runs here; probe confirms the flag is clear |
+| `scriptFlags` lacks `SCF_LOOK_FOR_ENEMIES` | `NPC_DefaultScriptFlags` sets `SCF_CHASE_ENEMIES|SCF_LOOK_FOR_ENEMIES` (`NPC_spawn.c:1348`) and `NPC_Spawn_Do` calls it (`:1693`) |
+
+What the source does show is that the port is unfinished. Inside
+`NPC_CheckEnemy` (`codemp/game/NPC_combat.c:1861`):
+
+```c
+//if ( NPC->svFlags & SVF_IGNORE_ENEMIES )
+if (0) //rwwFIXMEFIXME: support for this flag
+
+//rwwFIXMEFIXME: support for this flag
+/* if ( NPC->svFlags & SVF_LOCKEDENEMY ) ... */
+```
+
+And in the perception layer (`codemp/game/NPC_utils.c:1370`):
+
+```c
+qboolean NPC_FindPlayer( void )
+{
+	//OJKFIXME: clientnum 0
+	return NPC_TargetVisible( &g_entities[0] );
+}
+```
+
+Entire flag behaviors are stubbed to `if (0)`. Enemy acquisition carries
+the porter's own `rwwFIXMEFIXME` markers. Perception entry points are
+hardcoded to entity zero with an `OJKFIXME` attached. Campaign NPCs were
+never exercised in multiplayer, so this code has never run in anger.
+
+This does not by itself overturn the recommendation, but it invalidates
+the row of the comparison table that reads "NPC and AI: present" for the
+multiplayer tree. The correct entry is "present, partially ported,
+non-functional for campaign NPCs." The singleplayer AI, by contrast, is
+known to work — it runs the retail game.
+
+If debugging the multiplayer AI proves open-ended, the widen-singleplayer
+route should be re-priced against this finding rather than against the
+original table.
+
+## A real defect found along the way
+
+Singleplayer assigns every human player to `NPCTEAM_PLAYER` when it spawns
+them (`codeJK2/game/g_client.cpp:1625`). Multiplayer never does, leaving
+`playerTeam` zero-initialized to `NPCTEAM_FREE`.
+
+The singleplayer AI compares that field directly against its `enemyTeam`
+— see `NPC_AI_Stormtrooper.c:782` and `NPC_reactions.c:628` — so even once
+enemy acquisition is fixed, campaign NPCs would fail these checks.
+
+`patches/0002-set-playerteam-for-mp-clients.patch` sets `playerTeam` and
+`enemyTeam` at `ClientSpawn`, gated to `level.gametype < GT_TEAM` so the
+team gametypes are untouched. This is necessary but was not sufficient to
+make the stormtroopers hostile; the enemy-acquisition path stops earlier.
 
 ## Known remaining work
 
