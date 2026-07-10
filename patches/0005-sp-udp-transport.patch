@@ -104,7 +104,7 @@ index aeaff246..628952ff 100644
  		}
  
 diff --git a/code/qcommon/net_chan.cpp b/code/qcommon/net_chan.cpp
-index 79bc3336..dc3e9ed2 100644
+index 79bc3336..1a4763c7 100644
 --- a/code/qcommon/net_chan.cpp
 +++ b/code/qcommon/net_chan.cpp
 @@ -394,6 +394,10 @@ qboolean	NET_CompareBaseAdr (netadr_t a, netadr_t b)
@@ -146,7 +146,39 @@ index 79bc3336..dc3e9ed2 100644
  	Com_Printf ("NET_CompareAdr: bad address type\n");
  	return qfalse;
  }
-@@ -543,6 +561,10 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to )
+@@ -491,16 +509,22 @@ void NET_SendLoopPacket (netsrc_t sock, int length, const void *data, netadr_t t
+ 	loop = &loopbacks[sock^1];
+ 
+ 	//Make sure there is enough free space in the buffer.
+-#ifdef _DEBUG
+-	int freeSpace;
+-	if(loop->send >= loop->get) {
+-		freeSpace = MAX_LOOPDATA - (loop->send - loop->get);
+-	} else {
+-		freeSpace = loop->get - loop->send;
+-	}
++	// This check used to be #ifdef _DEBUG. A release build therefore overran
++	// the ring silently and corrupted whatever followed it, which is a latent
++	// buffer overflow independent of anything this project changed.
++	{
++		int freeSpace;
++		if(loop->send >= loop->get) {
++			freeSpace = MAX_LOOPDATA - (loop->send - loop->get);
++		} else {
++			freeSpace = loop->get - loop->send;
++		}
+ 
+-	assert(freeSpace > length);
+-#endif // _DEBUG
++		if ( freeSpace <= length ) {
++			Com_Error( ERR_DROP, "NET_SendLoopPacket: loopback overflow (%i bytes, %i free)",
++				length, freeSpace );
++		}
++	}
+ 
+ 	//Get write position.  Wrap around if too close to end.
+ 	i = loop->send;
+@@ -543,6 +567,10 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to )
  		NET_SendLoopPacket (sock, length, data, to);
  		return;
  	}
@@ -157,7 +189,7 @@ index 79bc3336..dc3e9ed2 100644
  }
  
  /*
-@@ -580,13 +602,16 @@ Traps "localhost" for loopback, passes everything else to system
+@@ -580,13 +608,16 @@ Traps "localhost" for loopback, passes everything else to system
  =============
  */
  qboolean	NET_StringToAdr( const char *s, netadr_t *a ) {
