@@ -10,24 +10,50 @@ errors and a clean shutdown.
 
 ### What changed
 
-`patches/0004-widen-sp-max-clients.patch`, six files:
+`patches/0004-widen-sp-max-clients.patch`, seven files.
+
+The route comparison counted eight engine sites. **It was thirteen.** Five
+were missed because they iterate `svs.clients` with a different loop
+idiom (`for (i=0,cl=svs.clients ; i < 1 ; i++,cl++)`) that the original
+grep pattern did not match. One of them, the snapshot send loop, is the
+function that transmits world state to clients — without it a second
+client would connect and receive nothing.
 
 | File | Change |
 |---|---|
 | `code/qcommon/q_shared.h:618` | `MAX_CLIENTS` 1 → 2 |
 | `code/server/sv_init.cpp:179` | `Z_Malloc(sizeof(client_t) * 1)` → `* MAX_CLIENTS` |
+| `code/server/sv_init.cpp:180` | `numSnapshotEntities = 2 * 4 * 64` → `MAX_CLIENTS * 4 * 64` |
 | `code/server/sv_init.cpp:326` | `for (i=0; i<1; i++)` → `i<MAX_CLIENTS` |
-| `code/server/sv_client.cpp:100` | same |
-| `code/server/sv_game.cpp:1091` | same |
-| `code/server/sv_main.cpp:195` | same |
-| `code/server/sv_main.cpp:229` | same |
+| `code/server/sv_client.cpp:77` | reconnect slot reuse — **missed initially** |
+| `code/server/sv_client.cpp:100` | free-slot search |
+| `code/server/sv_game.cpp:1091` | clear gentity pointers |
+| `code/server/sv_main.cpp:149` | send data to all relevant clients — **missed initially** |
+| `code/server/sv_main.cpp:195` | client loop |
+| `code/server/sv_main.cpp:229` | connected-client count |
 | `code/server/sv_main.cpp:245` | `sv_maxclients` info string literal `1` → `MAX_CLIENTS` |
+| `code/server/sv_main.cpp:318` | identify packet sender — **missed initially** |
+| `code/server/sv_snapshot.cpp:709` | snapshot send loop — **missed initially** |
 | `codeJK2/game/g_main.cpp:654` | `level.maxclients = 1` → `MAX_CLIENTS` |
 | `codeJK2/game/g_main.cpp:659` | `g_entities[0].client = level.clients` → loop over all clients |
 
+The snapshot ring buffer at `sv_init.cpp:180` is sized per client. The
+multiplayer tree makes this explicit:
+
+```c
+// multiplayer
+svs.numSnapshotEntities = sv_maxclients->integer * 4 * MAX_SNAPSHOT_ENTITIES;
+// singleplayer, before
+svs.numSnapshotEntities = 2 * 4 * 64;
+```
+
+The leading `2` is not a client count — the multiplayer equivalent uses
+`PACKET_BACKUP` there — but the factor must nonetheless scale with clients
+or one client's snapshots overwrite another's.
+
 The loop bounds were replaced with `MAX_CLIENTS` rather than a cvar, so
 that raising the define is the single point of control. Introducing a
-real `sv_maxclients` cvar is a later step.
+real `sv_maxclients` cvar is part of milestone 2.
 
 ### What was verified
 
@@ -95,19 +121,88 @@ It is not the blocker the original document implied — but it is real, and
 it will fail loudly the first time a manual save happens with two clients,
 which is the correct behaviour.
 
-## Milestone 2: a second client
+## Correction: the singleplayer engine has no network transport
 
-The engine has two client slots and no way to fill the second. What is
-needed:
+The route comparison stated that the singleplayer engine "already speaks
+Quake 3's network protocol." That is true of the **protocol** and false of
+the **transport**, and the distinction was not checked before the claim
+was made.
 
-- `SV_DirectConnect` currently accepts one loopback client. The netchan,
-  snapshot, and usercmd machinery are all present and compiled in
-  (`msg.cpp`, `net_chan.cpp`, `sv_snapshot.cpp`, `sv_client.cpp`).
-- The singleplayer client (`code/client/`) connects to `localhost`, which
-  `NET_StringToAdr` traps as `NA_LOOPBACK`. A second, non-loopback client
-  would need the UDP path, which exists but is unexercised.
-- `sv_maxclients` is not a cvar in the singleplayer engine. It should
-  become one before the second client is useful.
+Present and compiled in: delta-compressed entity snapshots
+(`sv_snapshot.cpp`), usercmd handling (`sv_client.cpp`), netchan
+sequencing and fragmentation (`net_chan.cpp`), and message
+serialisation (`msg.cpp`).
+
+Absent: the wire.
+
+- **`net_ip.cpp` does not exist** in `code/qcommon/`. The multiplayer tree
+  has it, at 1,085 lines. `net_chan.cpp` is the only network file the
+  singleplayer engine compiles (`code/CMakeLists.txt:169`).
+- **`NET_Init` is an empty inline stub**, annotated by OpenJK's own
+  maintainers:
+
+  ```c
+  // code/qcommon/qcommon.h
+  // For compatibility with shared code
+  static inline void NET_Init( void ) {}
+  static inline void NET_Shutdown( void ) {}
+  ```
+
+- **`NET_SendPacket` silently discards anything that is not loopback.**
+  The function body handles `NA_LOOPBACK` and then returns; there is no
+  `else` branch and no socket call.
+
+  ```c
+  void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to ) {
+      if ( to.type == NA_LOOPBACK ) {
+          NET_SendLoopPacket (sock, length, data, to);
+          return;
+      }
+  }
+  ```
+
+- **`NET_StringToAdr` resolves exactly one address.** Only the literal
+  string `"localhost"` succeeds, mapping to `NA_LOOPBACK`. Everything else
+  becomes `NA_BAD`.
+
+- The only receive path is `NET_GetLoopPacket`, reading a two-entry
+  in-memory ring buffer.
+
+`nm` on the built binary confirms this: `openjo_sp.x86_64` contains eight
+`NET_*` symbols, all from `net_chan.cpp`, and none of `NET_Init`,
+`NET_GetPacket`, or `NET_OpenIP`.
+
+Raven did not merely cap the client count. They removed the UDP transport
+and left the protocol layer running over an in-memory buffer. The single
+player is a network client with no network.
+
+## Milestone 2: restore the network transport
+
+This is a larger task than "connect a second client", and it is the real
+cost of the widen-singleplayer route.
+
+The work is to port `codemp/qcommon/net_ip.cpp` into the singleplayer
+engine. It is not a copy: the two trees' function signatures differ, most
+visibly
+
+```c
+// singleplayer: by value
+void NET_SendPacket (netsrc_t sock, int length, const void *data, netadr_t to);
+// multiplayer:  by pointer
+void NET_SendPacket (netsrc_t sock, int length, const void *data, const netadr_t *to);
+```
+
+Much of the multiplayer file is not needed — SOCKS proxying, IPX, master
+server heartbeats. The essential surface is `NET_Init`, `NET_Shutdown`,
+`NET_Config`, `NET_OpenIP`, `NET_GetPacket`, and a real `NET_SendPacket`
+and `NET_StringToAdr`.
+
+Once a packet can cross a socket, `SV_DirectConnect` already searches for
+a free slot among `MAX_CLIENTS` and rejects with "Server is full" — that
+path is now correct and untested.
+
+`sv_maxclients` should become a real cvar at the same time, replacing the
+`MAX_CLIENTS` compile-time bound in the loops widened above.
 
 ## Open questions
 

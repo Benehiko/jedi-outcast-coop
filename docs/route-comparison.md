@@ -39,7 +39,7 @@ runtime remapping table between the two enums, derived and validated
 animation by animation, or re-rigging Jedi Outcast's models against Jedi
 Academy's skeleton — which discards the assets that motivate the project.
 
-**The singleplayer engine's client cap is eight sites.** Raven did not
+**The singleplayer engine's client cap is thirteen sites.** Raven did not
 remove the multiplayer architecture from the singleplayer engine. They set
 it to one and left the original value in a comment:
 
@@ -49,8 +49,22 @@ it to one and left the original value in a comment:
 
 The delta-compressed snapshot system, the netchan, usercmd handling, and
 the client/server split are all present and compiled into `openjo_sp`.
-The single player already connects over an in-memory loopback netchan. The
-cap is a dial, not an absence.
+The cap is a dial.
+
+> **Corrected after implementation.** This section originally said "eight
+> sites" and claimed the singleplayer engine "already speaks Quake 3's
+> network protocol." The count was thirteen — five loops over
+> `svs.clients` used an idiom the survey grep missed, including the
+> snapshot send loop. And the protocol claim is only half right: the
+> protocol layer is intact, but the **transport is absent**. `net_ip.cpp`
+> does not exist in the singleplayer tree, `NET_Init` is an empty inline
+> stub, and `NET_SendPacket` silently discards anything that is not
+> loopback. Restoring the transport, not raising the cap, is the real cost
+> of this route. See [widen-sp-progress.md](widen-sp-progress.md).
+>
+> This does not reverse the recommendation. Porting `net_ip.cpp` is a
+> bounded, well-understood task against working code; the animation enum
+> divergence on the multiplayer route is not.
 
 ## Measured costs
 
