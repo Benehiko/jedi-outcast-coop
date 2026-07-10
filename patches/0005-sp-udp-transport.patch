@@ -10,6 +10,75 @@ index 3ac6ed18..664ac072 100644
  
  		"${SPDir}/qcommon/q_shared.cpp"
  		"${SPDir}/qcommon/q_shared.h"
+diff --git a/code/client/cl_main.cpp b/code/client/cl_main.cpp
+index 1a5c2446..88a51530 100644
+--- a/code/client/cl_main.cpp
++++ b/code/client/cl_main.cpp
+@@ -347,6 +347,56 @@ void CL_ForwardToServer_f( void ) {
+ 	}
+ }
+ 
++/*
++==================
++CL_Connect_f
++
++connect <address[:port]>
++
++The singleplayer client has only ever attached to its own server over the
++in-memory loopback, via CL_MapLoading. This drives the same code path with a
++real address. The server accepts unchallenged connects, so we enter
++CA_CHALLENGING directly rather than requesting a challenge first -- exactly
++as CL_MapLoading does for localhost.
++==================
++*/
++void CL_Connect_f( void ) {
++	const char	*server;
++
++	if ( Cmd_Argc() != 2 ) {
++		Com_Printf( "usage: connect <address[:port]>\n" );
++		return;
++	}
++
++	server = Cmd_Argv(1);
++
++	// clear nextmap so the cinematic shutdown doesn't execute it
++	Cvar_Set( "nextmap", "" );
++	CL_Disconnect();
++	Con_Close();
++
++	Q_strncpyz( cls.servername, server, sizeof(cls.servername) );
++
++	if ( !NET_StringToAdr( cls.servername, &clc.serverAddress ) ) {
++		Com_Printf( "Bad server address: %s\n", cls.servername );
++		cls.state = CA_DISCONNECTED;
++		return;
++	}
++
++	if ( clc.serverAddress.port == 0 ) {
++		clc.serverAddress.port = BigShort( (short)Cvar_VariableIntegerValue("net_port") );
++	}
++
++	Com_Printf( "%s resolved to %s\n", cls.servername, NET_AdrToString( clc.serverAddress ) );
++
++	cls.state = CA_CHALLENGING;		// so the connect screen is drawn
++	Key_SetCatcher( 0 );
++	SCR_UpdateScreen();
++	clc.connectTime = -RETRANSMIT_TIMEOUT;	// send the connect packet immediately
++
++	CL_CheckForResend();
++}
++
+ /*
+ ==================
+ CL_Disconnect_f
+@@ -1309,6 +1359,7 @@ void CL_Init( void ) {
+ 	Cmd_AddCommand ("clientinfo", CL_Clientinfo_f);
+ 	Cmd_AddCommand ("snd_restart", CL_Snd_Restart_f);
+ 	Cmd_AddCommand ("vid_restart", CL_Vid_Restart_f);
++	Cmd_AddCommand ("connect", CL_Connect_f);
+ 	Cmd_AddCommand ("disconnect", CL_Disconnect_f);
+ 	Cmd_AddCommand ("cinematic", CL_PlayCinematic_f);
+ 	Cmd_SetCommandCompletionFunc( "cinematic", CL_CompleteCinematic );
 diff --git a/code/qcommon/common.cpp b/code/qcommon/common.cpp
 index aeaff246..628952ff 100644
 --- a/code/qcommon/common.cpp
@@ -35,10 +104,49 @@ index aeaff246..628952ff 100644
  		}
  
 diff --git a/code/qcommon/net_chan.cpp b/code/qcommon/net_chan.cpp
-index 79bc3336..c0eab5b0 100644
+index 79bc3336..dc3e9ed2 100644
 --- a/code/qcommon/net_chan.cpp
 +++ b/code/qcommon/net_chan.cpp
-@@ -543,6 +543,10 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to )
+@@ -394,6 +394,10 @@ qboolean	NET_CompareBaseAdr (netadr_t a, netadr_t b)
+ 	if (a.type == NA_LOOPBACK)
+ 		return qtrue;
+ 
++	// same omission as NET_CompareAdr: every IP address compared unequal
++	if (a.type == NA_IP)
++		return (qboolean)(a.ipi == b.ipi);
++
+ 	Com_Printf ("NET_CompareBaseAdr: bad address type\n");
+ 	return qfalse;
+ }
+@@ -404,6 +408,15 @@ const char	*NET_AdrToString (netadr_t a)
+ 
+ 	if (a.type == NA_LOOPBACK) {
+ 		Com_sprintf (s, sizeof(s), "loopback");
++	} else if (a.type == NA_BOT) {
++		Com_sprintf (s, sizeof(s), "bot");
++	} else if (a.type == NA_IP) {
++		// this branch did not exist: an NA_IP address returned the previous
++		// contents of the static buffer
++		Com_sprintf (s, sizeof(s), "%i.%i.%i.%i:%hu",
++			a.ip[0], a.ip[1], a.ip[2], a.ip[3], BigShort(a.port));
++	} else {
++		Com_sprintf (s, sizeof(s), "unknown");
+ 	}
+ 
+ 	return s;
+@@ -418,6 +431,11 @@ qboolean	NET_CompareAdr (netadr_t a, netadr_t b)
+ 	if (a.type == NA_LOOPBACK)
+ 		return qtrue;
+ 
++	// this used to print "bad address type" and return false for every IP
++	// address, so the server could never match an incoming packet to a client
++	if (a.type == NA_IP)
++		return (qboolean)(a.ipi == b.ipi && a.port == b.port);
++
+ 	Com_Printf ("NET_CompareAdr: bad address type\n");
+ 	return qfalse;
+ }
+@@ -543,6 +561,10 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to )
  		NET_SendLoopPacket (sock, length, data, to);
  		return;
  	}
@@ -49,7 +157,7 @@ index 79bc3336..c0eab5b0 100644
  }
  
  /*
-@@ -580,13 +584,16 @@ Traps "localhost" for loopback, passes everything else to system
+@@ -580,13 +602,16 @@ Traps "localhost" for loopback, passes everything else to system
  =============
  */
  qboolean	NET_StringToAdr( const char *s, netadr_t *a ) {

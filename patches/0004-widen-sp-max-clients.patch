@@ -12,10 +12,35 @@ index 732b9025..50633626 100644
  
  #define	GENTITYNUM_BITS		10		// don't need to send any more
 diff --git a/code/server/sv_client.cpp b/code/server/sv_client.cpp
-index 8e948c07..79db5f3d 100644
+index 8e948c07..45b9f80e 100644
 --- a/code/server/sv_client.cpp
 +++ b/code/server/sv_client.cpp
-@@ -74,7 +74,7 @@ void SV_DirectConnect( netadr_t from ) {
+@@ -61,20 +61,27 @@ void SV_DirectConnect( netadr_t from ) {
+ 
+ 	//challenge = atoi( Info_ValueForKey( userinfo, "challenge" ) );
+ 
+-	// see if the challenge is valid (local clients don't need to challenge)
+-	if ( !NET_IsLocalAddress (from) ) {
+-		NET_OutOfBandPrint( NS_SERVER, from, "print\nNo challenge for address.\n" );
+-		return;
+-	} else {
++	// Raven removed the challenge handshake along with the UDP transport, so
++	// this used to reject every non-local address outright. There is no
++	// svs.challenges array and no SV_GetChallenge to restore.
++	//
++	// A challenge exists to stop an attacker spoofing source addresses to
++	// flood a public server's client slots. This engine has MAX_CLIENTS slots
++	// and no server browser, so remote connects are accepted unchallenged.
++	// Anyone exposing it beyond a trusted LAN wants a real challenge system
++	// first -- port SV_GetChallenge from codemp/server/sv_main.cpp.
++	if ( NET_IsLocalAddress (from) ) {
+ 		// force the "ip" info key to "localhost"
+ 		Info_SetValueForKey( userinfo, "ip", "localhost" );
++	} else {
++		Info_SetValueForKey( userinfo, "ip", NET_AdrToString( from ) );
+ 	}
+ 
+ 	newcl = &temp;
  	memset (newcl, 0, sizeof(client_t));
  
  	// if there is already a slot for this ip, reuse it
@@ -24,7 +49,7 @@ index 8e948c07..79db5f3d 100644
  	{
  		if ( cl->state == CS_FREE ) {
  			continue;
-@@ -97,7 +97,7 @@ void SV_DirectConnect( netadr_t from ) {
+@@ -97,7 +104,7 @@ void SV_DirectConnect( netadr_t from ) {
  
  
  	newcl = NULL;
@@ -34,9 +59,27 @@ index 8e948c07..79db5f3d 100644
  		if (cl->state == CS_FREE) {
  			newcl = cl;
 diff --git a/code/server/sv_game.cpp b/code/server/sv_game.cpp
-index 8cd596fb..db502674 100644
+index 8cd596fb..28e475c9 100644
 --- a/code/server/sv_game.cpp
 +++ b/code/server/sv_game.cpp
+@@ -104,7 +104,7 @@ void SV_GameSendServerCommand( int clientNum, const char *fmt, ... ) {
+ 	if ( clientNum == -1 ) {
+ 		SV_SendServerCommand( NULL, "%s", msg );
+ 	} else {
+-		if ( clientNum < 0 || clientNum >= 1 ) {
++		if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+ 			return;
+ 		}
+ 		SV_SendServerCommand( svs.clients + clientNum, "%s", msg );
+@@ -120,7 +120,7 @@ Disconnects the client with a message
+ ===============
+ */
+ void SV_GameDropClient( int clientNum, const char *reason ) {
+-	if ( clientNum < 0 || clientNum >= 1 ) {
++	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+ 		return;
+ 	}
+ 	SV_DropClient( svs.clients + clientNum, reason );
 @@ -1088,7 +1088,7 @@ void SV_InitGameProgs (void) {
  
  	// clear all gentity pointers that might still be set from
@@ -47,9 +90,27 @@ index 8cd596fb..db502674 100644
  	}
  }
 diff --git a/code/server/sv_init.cpp b/code/server/sv_init.cpp
-index c9dd4880..d0c45b76 100644
+index c9dd4880..c84f074c 100644
 --- a/code/server/sv_init.cpp
 +++ b/code/server/sv_init.cpp
+@@ -101,7 +101,7 @@ SV_SetUserinfo
+ ===============
+ */
+ void SV_SetUserinfo( int index, const char *val ) {
+-	if ( index < 0 || index >= 1 ) {
++	if ( index < 0 || index >= MAX_CLIENTS ) {
+ 		Com_Error (ERR_DROP, "SV_SetUserinfo: bad index %i\n", index);
+ 	}
+ 
+@@ -124,7 +124,7 @@ void SV_GetUserinfo( int index, char *buffer, int bufferSize ) {
+ 	if ( bufferSize < 1 ) {
+ 		Com_Error( ERR_DROP, "SV_GetUserinfo: bufferSize == %i", bufferSize );
+ 	}
+-	if ( index < 0 || index >= 1 ) {
++	if ( index < 0 || index >= MAX_CLIENTS ) {
+ 		Com_Error (ERR_DROP, "SV_GetUserinfo: bad index %i\n", index);
+ 	}
+ 	Q_strncpyz( buffer, svs.clients[ index ].userinfo, bufferSize );
 @@ -176,8 +176,12 @@ void SV_Startup( void ) {
  		Com_Error( ERR_FATAL, "SV_Startup: svs.initialized" );
  	}

@@ -176,7 +176,75 @@ Raven did not merely cap the client count. They removed the UDP transport
 and left the protocol layer running over an in-memory buffer. The single
 player is a network client with no network.
 
-## Milestone 2: restore the network transport
+## Milestone 2: the transport — done; the connection — not yet
+
+`patches/0005-sp-udp-transport.patch` adds `code/qcommon/net_ip.cpp`, a
+reduced port of the multiplayer socket layer, and wires it in.
+
+### Verified
+
+- `openjo_sp.x86_64` now links `socket`, `bind`, `recvfrom`, `sendto` and
+  `gethostbyname`. Before, it contained eight `NET_*` symbols and no
+  syscalls.
+- With `net_enabled 1 net_port 29090`, `ss` reports the process holding
+  `UDP 0.0.0.0:29090`.
+- With `net_enabled` unset the game opens no socket, loads `kejim_post`,
+  exits 0 and logs zero errors — singleplayer is untouched.
+- A second `openjo_sp` process resolves the host address and reaches
+  `SV_DirectConnect`, which assigns it client slot 1.
+
+### Three more functions Raven had gutted
+
+Found by running the connection, not by reading:
+
+```c
+const char *NET_AdrToString (netadr_t a) {
+    if (a.type == NA_LOOPBACK) { ... }
+    return s;                      // NA_IP: returns the stale static buffer
+}
+
+qboolean NET_CompareAdr (netadr_t a, netadr_t b) {
+    if (a.type == NA_LOOPBACK) return qtrue;
+    Com_Printf("bad address type"); return qfalse;   // every IP compares unequal
+}
+```
+
+`NET_CompareBaseAdr` had the same omission. A server that cannot compare
+two IP addresses cannot match an incoming packet to a client, so this was
+fatal rather than cosmetic.
+
+Four client-index bounds checks were also still hardcoded, and one of them
+produced a visible `SV_GetUserinfo: bad index 1` error dialog the first
+time a second client was accepted — which was itself the proof that
+`SV_DirectConnect` had assigned slot 1 over the wire:
+
+| Site | Function |
+|---|---|
+| `sv_init.cpp:104` | `SV_SetUserinfo` |
+| `sv_init.cpp:127` | `SV_GetUserinfo` |
+| `sv_game.cpp:107` | `SV_GameSendServerCommand` |
+| `sv_game.cpp:123` | `SV_GameDropClient` |
+
+### Where it stops
+
+The client-side `connect <address[:port]>` command did not exist; the
+singleplayer client only ever attached to its own server via
+`CL_MapLoading`. `CL_Connect_f` has been added and registered.
+
+It resolves the address and sets `cls.state = CA_CHALLENGING`, but the
+engine's own startup subsequently drives the local client to `CA_PRIMED`
+(state 6). `CL_CheckForResend` only transmits while state is between
+`CA_CONNECTING` and `CA_CHALLENGING`, so the `connect` packet is never
+sent and the host never sees a connection attempt.
+
+This is a client-state-machine problem, not a transport problem. The
+singleplayer client assumes it is always attached to a local server;
+connecting to a remote one requires suppressing that local attach, or
+deferring `CL_Connect_f` until after client initialisation completes.
+
+That is the next piece of work.
+
+## Reference: restoring the network transport
 
 This is a larger task than "connect a second client", and it is the real
 cost of the widen-singleplayer route.
