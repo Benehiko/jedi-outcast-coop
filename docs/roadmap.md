@@ -61,11 +61,59 @@ the process. A client sharing that process gets it for free. A remote client
 runs no server, so `tr.world` is never populated: black screen, no weapon
 model, no HUD, while movement and replication work perfectly.
 
-The fix is to load the world on a client that has no local server. The
-multiplayer tree's cgame issues `CG_R_LOADWORLDMAP` itself; the singleplayer
-cgame does not, because it never had to. Either teach the singleplayer cgame
-to load the world when `!com_sv_running`, or have the engine do it in
-`CL_InitCGame` before `CG_INIT` when no server is running.
+### Why: the client's cgame VM is initialised by the server
+
+Attempted and reverted. The chain is:
+
+```c
+// sv_game.cpp, inside SV_InitGameProgs
+gameLibrary = Sys_LoadSPGameDll( "jospgame", &GetGameAPI );
+ge = GetGameAPI( &import );          // populates the gamecode's `gi` table
+//hook up the client while we're here
+CL_InitCGameVM( gameLibrary );       // populates cgvm.entryPoint
+```
+
+```c
+// vmachine.cpp
+if ( cgvm.entryPoint ) { ... }       // null on a serverless client
+```
+
+A remote client never runs `SV_InitGameProgs`, so `cgvm.entryPoint` stays
+null and **every `VM_Call` is a silent no-op**. `CG_INIT` appears to succeed
+while the cgame never executes a line. The client is left connected, moving,
+and replicating correctly, with no world, no weapon model and no HUD --
+exactly the observed symptoms.
+
+Loading the library from `CL_InitCGame` when `cgvm.entryPoint` is null does
+make the cgame run. It then segfaults immediately:
+
+```
+CG_Init            cg_main.cpp:1772
+CG_ParseMenu       "ui/hud.menu"
+Com_Printf         g_main.cpp:871
+0x0000000000000000                    <- gi.Printf is null
+```
+
+The cgame and the server game are **one shared library with one import
+table**. `gi` is assigned only inside `GetGameAPI`, which the server calls.
+`game_import_t` carries **127 function pointers**, most of them server
+services -- `linkentity`, `trace`, `SetBrushModel`, the whole Ghoul2 API --
+that a client cannot meaningfully provide. `cg_camera.cpp` alone calls `gi.`
+eleven times.
+
+So the singleplayer cgame is not separable from the singleplayer server as
+the code stands. The options, none small:
+
+- **Populate a client-side `gi`** with the subset the cgame actually touches,
+  and abort on the rest. Requires auditing all 127 entries.
+- **Split the cgame out of the game library**, as the multiplayer tree does
+  (`cgamex86_64.so` is separate from `jampgamex86_64.so`).
+- **Run a headless server on the joining client**, so the existing
+  initialisation path runs unmodified, and let it slave to the remote one.
+  Cheapest to try, ugliest to live with.
+
+This is the deepest coupling found so far, and it is more fundamental than
+the netcode was.
 
 ### Entity fields are not round-tripping correctly
 
