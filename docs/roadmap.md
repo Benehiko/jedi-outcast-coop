@@ -115,6 +115,39 @@ the code stands. The options, none small:
 This is the deepest coupling found so far, and it is more fundamental than
 the netcode was.
 
+### Prototype: populating client `gi` -- tried, does not work
+
+The middle option was prototyped. The import-table construction was factored
+out of `SV_InitGameProgs` into `SV_BuildGameImport`, and the client called
+`GetGameAPI` with it from `CL_InitCGame` so the shared library's `gi` would
+be populated. Reverted.
+
+`gi.Printf` did resolve -- the first crash was gone -- but the client then
+faulted deeper:
+
+```
+GetGameAPI            g_main.cpp:824
+GI_Init               gameinfo.cpp:48
+WP_LoadWeaponParms
+G_EffectIndex
+G_FindConfigstringIndex
+SV_SetConfigstring    sv_init.cpp:58   <- strcmp(val, sv.configstrings[i]) with a null entry
+```
+
+The lesson is that **`GetGameAPI` is not a passive table swap.** It runs
+`GI_Init` -> `WP_LoadWeaponParms`, which registers weapon effects through
+`G_EffectIndex` -> `SV_SetConfigstring`, which writes `sv.configstrings` --
+allocated per-configstring during `SV_SpawnServer`. On a serverless client
+`sv` is zeroed and those pointers are null.
+
+So the game side of the shared library performs real server initialisation as
+part of its API entry point. Populating `gi` cannot be made to work without
+also standing up enough of `sv` to satisfy it, at which point it is a server.
+
+This settles the choice: the cgame must be split into its own library, as the
+multiplayer tree does. That is the next task and it is large -- 55 direct
+cross-calls between the JK2 SP game and cgame become a defined boundary.
+
 ### Entity fields are not round-tripping correctly
 
 Observed in play: a red/green/blue coordinate-axis gizmo is drawn where an
