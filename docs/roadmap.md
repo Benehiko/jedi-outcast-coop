@@ -25,30 +25,47 @@ those assets shipped with.
 | Client survives its first snapshot | Done — real field serialisation over the wire |
 | Second player spawns clear of the first | Done — `G_DisplaceSpawnOrigin` |
 | Second player visible in the host's world | **Done — confirmed on screen** |
-| Second client renders its own view | **Blocked** — it never loads the map. See below |
+| Second client moves, replicates to host | **Done — confirmed on screen** |
+| Second client renders its own view | **Blocked** — no world is loaded into its renderer. See below |
 | Two players fighting NPCs | Not started |
 
-### The remote client never loads the map
+### The remote client is fully connected but has no world
 
-Verified by probe, not inference. The handshake completes:
+The decisive observation was the user's, not a log line: **"I can move on
+client 2 but I cannot see anything. Client 1 can see me moving."** Plus: no
+gun.
 
-    CL_PacketEvent: from=127.0.0.1:29090 cursize=19    oob=1 state=3   (CA_CHALLENGING)
-    CL_PacketEvent: from=127.0.0.1:29090 cursize=10884 oob=0 state=4   (CA_CONNECTED)
+So client 2 is a working client. It sends usercmds, the server simulates its
+player, and the movement replicates back to client 1's view. The netcode
+round-trip is complete in both directions. What it lacks is a world to draw.
 
-`connectResponse` and the 10,884-byte gamestate both arrive and are accepted.
-`cls.state` advances to `CA_CONNECTED`, `CL_ParseGamestate` runs, and the
-process then prints nothing further. It stays alive, holds a GPU handle,
-spins a frame loop, and draws black.
+Probes confirm the client-side chain runs to completion:
 
-The cause is structural. `CL_InitCGame` reads `mapname` out of the gamestate
-and calls `CG_INIT`, but **nothing loads the BSP into the client's collision
-model**. In singleplayer `SV_SpawnServer` calls `CM_LoadMap` in the same
-process and the client simply uses it. A remote client has no server, so
-`CM_LoadMap` never runs.
+    gamestate: parsed ok, cmd loop done
+    InitCGame: mapname='maps/kejim_post.bsp'
+    InitCGame: calling CG_INIT
+    InitCGame: CG_INIT returned
+    gamestate: CL_StartHunkUsers returned, state=6 cgameStarted=1
 
-The multiplayer tree loads the map on the client from the `CS_SERVERINFO`
-mapname during `CL_SystemInfoChanged`. That is the fix, and it is the next
-task.
+`cls.state` reaches `CA_PRIMED`, `cgameStarted` is 1, the mapname resolves.
+Nothing hangs and nothing errors.
+
+The cause: `re.LoadWorld` is called from exactly one place, the cgame syscall
+`CG_R_LOADWORLDMAP` (`cl_cgame.cpp:963`), and probes show **neither client
+ever invokes it** -- not even the host, which renders correctly. The only
+other world load is `CM_LoadMap` inside `SV_SpawnServer`
+(`sv_init.cpp:295`).
+
+In this engine the world reaches the renderer through the *server* side of
+the process. A client sharing that process gets it for free. A remote client
+runs no server, so `tr.world` is never populated: black screen, no weapon
+model, no HUD, while movement and replication work perfectly.
+
+The fix is to load the world on a client that has no local server. The
+multiplayer tree's cgame issues `CG_R_LOADWORLDMAP` itself; the singleplayer
+cgame does not, because it never had to. Either teach the singleplayer cgame
+to load the world when `!com_sv_running`, or have the engine do it in
+`CL_InitCGame` before `CG_INIT` when no server is running.
 
 ### Entity fields are not round-tripping correctly
 
