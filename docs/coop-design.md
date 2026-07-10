@@ -1,6 +1,17 @@
 # Cooperative Campaign: Design and Feasibility
 
-**Status:** Investigation complete. Load test passed with one new finding.
+> **Superseded.** This document's recommendation — host the campaign on the
+> multiplayer tree — has been reversed after testing. Jedi Academy's
+> animation enum diverges from Jedi Outcast's by 332 entries starting at
+> index 1, so Jedi Outcast's models cannot be displayed or animated
+> correctly under that engine. See [route-comparison.md](route-comparison.md)
+> for the re-priced comparison and [investigation-log.md](investigation-log.md)
+> for the full record.
+>
+> The findings below remain accurate. The conclusion drawn from them does
+> not.
+
+**Status:** Superseded by [route-comparison.md](route-comparison.md).
 **Goal:** Two or more players cooperatively playing the Jedi Outcast
 campaign maps. No cutscenes, no scripted sequences.
 

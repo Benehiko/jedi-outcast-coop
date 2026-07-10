@@ -60,9 +60,19 @@ Then:
 
 ## Cooperative campaign
 
-See [docs/coop-design.md](docs/coop-design.md) for the feasibility study.
-The campaign is hosted on the multiplayer tree, which retains ICARUS,
-the singleplayer AI roster, Ghoul2, and the saber system.
+**Route reversed.** See [docs/route-comparison.md](docs/route-comparison.md).
+Hosting the campaign on the Jedi Academy multiplayer tree works well
+enough to play — two clients connect, spawn, see each other, and fight —
+but that engine's animation enum has 1,534 entries against Jedi Outcast's
+1,202, diverging from index 1. Jedi Outcast's models render collapsed and
+its NPCs never complete their attack animations. The current plan is to
+widen the singleplayer engine instead, whose client cap is eight sites.
+
+[docs/investigation-log.md](docs/investigation-log.md) records everything
+tried, measured, and concluded, including the wrong turns.
+
+The multiplayer branch below still runs, and produced two upstream bug
+fixes worth keeping.
 
 Build the multiplayer targets by inverting the `BuildMP*` / `BuildJK2SP*`
 flags above. Note the two trees use *different* data directories:
@@ -103,6 +113,17 @@ Outcast's files rather than Jedi Academy's:
 Run a second client with a different `fs_homepath` to play locally:
 
     ./openjk.x86_64 +set fs_homepath /tmp/jk2-client2 ... +set name Jan ...
+
+Clients connect as **spectators** — floating, no clipping, unable to
+shoot. `ClientBegin` fires for spectators, so a connected client in the
+server log has not necessarily joined the game. Put them on the free team
+from the server console:
+
+    forceteam 0 free
+    forceteam 1 free
+
+Campaign NPCs skip spectators (`NPC_ValidEnemy`), so until a client joins
+a team the stormtroopers will correctly ignore it.
 
 ### Asset path differences
 
