@@ -1,0 +1,84 @@
+diff --git a/codemp/game/NPC_stats.c b/codemp/game/NPC_stats.c
+index 3293411e..fee95ac4 100644
+--- a/codemp/game/NPC_stats.c
++++ b/codemp/game/NPC_stats.c
+@@ -238,8 +238,10 @@ extern qboolean BG_ParseLiteral( const char **data, const char *string );
+ #define MAX_NPC_DATA_SIZE 0x40000
+ char	NPCParms[MAX_NPC_DATA_SIZE];
+ 
+-/*
+-team_t TranslateTeamName( const char *name )
++// Returns npcteam_t rather than team_t: this walks the NPCTEAM_* range and
++// indexes TeamNames[], which holds the NPC team names. team_t is the unrelated
++// multiplayer FFA/CTF team enum.
++npcteam_t TranslateTeamName( const char *name )
+ {
+ 	int n;
+ 
+@@ -247,13 +249,14 @@ team_t TranslateTeamName( const char *name )
+ 	{
+ 		if ( Q_stricmp( TeamNames[n], name ) == 0 )
+ 		{
+-			return ((team_t) n);
++			return ((npcteam_t) n);
+ 		}
+ 	}
+ 
+ 	return NPCTEAM_FREE;
+ }
+ 
++/*
+ class_t TranslateClassName( const char *name )
+ {
+ 	int n;
+@@ -725,15 +728,14 @@ void NPC_Precache ( gentity_t *spawner )
+ 		// playerTeam
+ 		if ( !Q_stricmp( token, "playerTeam" ) )
+ 		{
+-			char tk[4096]; //rww - hackilicious!
+-
+ 			if ( COM_ParseString( &p, &value ) )
+ 			{
+ 				continue;
+ 			}
+-			//playerTeam = TranslateTeamName(value);
+-			Com_sprintf(tk, sizeof(tk), "NPC%s", token);
+-			playerTeam = GetIDForString( TeamTable, tk );
++			// This used to format the key ("playerTeam") rather than the parsed
++			// value ("player"), so it looked up "NPCplayerTeam" in TeamTable,
++			// missed, and stored TeamTable's -1 terminator.
++			playerTeam = TranslateTeamName( value );
+ 			continue;
+ 		}
+ 
+@@ -2129,28 +2131,22 @@ qboolean NPC_ParseParms( const char *NPCName, gentity_t *NPC )
+ 			// playerTeam
+ 			if ( !Q_stricmp( token, "playerTeam" ) )
+ 			{
+-				char tk[4096]; //rww - hackilicious!
+-
+ 				if ( COM_ParseString( &p, &value ) )
+ 				{
+ 					continue;
+ 				}
+-				Com_sprintf(tk, sizeof(tk), "NPC%s", token);
+-				NPC->client->playerTeam = NPC->s.teamowner = (team_t)GetIDForString( TeamTable, tk );//TranslateTeamName(value);
++				NPC->client->playerTeam = NPC->s.teamowner = TranslateTeamName( value );
+ 				continue;
+ 			}
+ 
+ 			// enemyTeam
+ 			if ( !Q_stricmp( token, "enemyTeam" ) )
+ 			{
+-				char tk[4096]; //rww - hackilicious!
+-
+ 				if ( COM_ParseString( &p, &value ) )
+ 				{
+ 					continue;
+ 				}
+-				Com_sprintf(tk, sizeof(tk), "NPC%s", token);
+-				NPC->client->enemyTeam = GetIDForString( TeamTable, tk );//TranslateTeamName(value);
++				NPC->client->enemyTeam = TranslateTeamName( value );
+ 				continue;
+ 			}
+ 
