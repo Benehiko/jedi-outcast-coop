@@ -74,9 +74,11 @@ The cap is a dial.
 |---|---:|---|
 | `MAX_CLIENTS` | 1 | `q_shared.h:618`, original value `128` in comment |
 | `svs.clients` allocation | 1 | `sv_init.cpp:179`, `sizeof(client_t) * 1` |
-| Hardcoded `i < 1` client loops | 5 | `sv_client.cpp:100`, `sv_game.cpp:1091`, `sv_init.cpp:326`, `sv_main.cpp:195,229` |
+| Snapshot ring buffer | 1 | `sv_init.cpp:180`, `2 * 4 * 64` — sized per client |
+| Hardcoded client loops | 9 | `sv_client.cpp:77,100`, `sv_game.cpp:1091`, `sv_init.cpp:326`, `sv_main.cpp:149,195,229,318`, `sv_snapshot.cpp:709` |
 | `sv_maxclients` info string | 1 | `sv_main.cpp:245`, literal `1` |
-| **Engine subtotal** | **8** | |
+| **Engine subtotal** | **13** | five loops missed by the original survey |
+| UDP transport | — | absent entirely; see the correction above |
 | `level.maxclients = 1` | 1 | `g_main.cpp:654`, plus one-slot `G_Alloc` at `:655` |
 | Save format `level.clients[0]` | 6 | `g_savegame.cpp:997,998,1044,1059,1062,1063` — two functions |
 | Global `player` assignments | 6 | `g_main.cpp:217,722`; three are function-local shadows |
@@ -111,12 +113,12 @@ symbol.
 
 | | Widen singleplayer | Campaign on multiplayer |
 |---|---|---|
-| Netcode | Present, capped at 1 (8 sites) | Works |
+| Netcode | Protocol present, capped at 1 (13 sites); **transport absent** | Works |
 | Animations | Native, correct | 1,202 vs 1,534 enum entries |
 | Models | Native, correct | Render collapsed |
 | NPC AI | Works — it runs the retail game | Partially ported; two defects found and fixed, more suspected |
 | Strings and HUD | Native, correct | `??` throughout |
-| Save format | 6 sites to generalise | Absent entirely |
+| Save format | 4 `level.clients[0]` uses + 2 asserts, in 2 functions | Absent entirely |
 | Principal risk | 474 reads of a global | An engine that cannot display the assets |
 
 ## Recommendation
@@ -126,7 +128,8 @@ Widen the singleplayer engine.
 The singleplayer engine's assets, animations, AI, strings, and save system
 are all natively correct, because it is the game those assets shipped
 with. Its only defect for this purpose is a client cap that Raven
-implemented as a `#define` and five loop bounds.
+implemented as a `#define` and nine loop bounds, plus a transport it
+removed entirely.
 
 The multiplayer route requires making a different game's engine display
 this game's data. Every layer touched so far — menus, HUD, NPC
@@ -150,10 +153,12 @@ abandoned:
 - **A confirmed asset inventory.** Campaign maps load, entities spawn,
   Ghoul2 models resolve.
 
-## Proposed next milestone
+## Next steps
 
-Raise `MAX_CLIENTS` in the singleplayer engine to 2, generalise the eight
-engine sites and `level.maxclients`, and observe what breaks. The save
-system will break — Raven left an assertion saying so
-(`g_savegame.cpp:997`). Everything else is unknown, which is the point of
-doing it.
+This section originally proposed raising `MAX_CLIENTS` to 2 and predicted
+the save system would break first. Both have since happened, and the
+prediction was wrong — the save assertions sit inside `if (!qbAutosave)`
+and were never reached.
+
+The forward plan now lives in [roadmap.md](roadmap.md). Progress against
+it is tracked in [widen-sp-progress.md](widen-sp-progress.md).

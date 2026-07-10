@@ -113,7 +113,8 @@ without touching the guarded path. Only a *manual* save reaches it.
 
 `WriteLevel` writes exactly one `GCLI` chunk containing `level.clients[0]`.
 `ReadLevel` reads exactly one and copies it back to `level.clients[0]`.
-Six sites, two functions (`g_savegame.cpp:997,998,1044,1059,1062,1063`).
+Four `level.clients[0]` uses (`g_savegame.cpp:998,1044,1062,1063`) plus the
+two assertions (`:997,1059`), across two functions.
 
 Generalising it means writing N chunks and reading N, plus a save-format
 version bump so existing saves still load. This is bounded and mechanical.
@@ -274,12 +275,22 @@ path is now correct and untested.
 
 ## Open questions
 
-- The global `player` symbol (`g_main.cpp:141`) is unconditionally aliased
-  to `&g_entities[0]` and read 474 times. It has only six assignment sites.
-  Nothing has been done about it yet, and nothing needed to be for this
-  milestone.
-- PLAYERONLY triggers test `other->s.number != 0` (`g_trigger.cpp:194`).
-  A second player will not trip them.
-- `cg_media.h:356` sizes `clientinfo[MAX_CLIENTS]`, which now has two
-  entries. The client-game has not been examined for other single-player
-  assumptions.
+These are carried as tasks in [roadmap.md](roadmap.md); the phase is noted
+against each. None has been started, and none needed to be for the
+milestones above.
+
+- **The global `player` symbol** (`g_main.cpp:141`) is unconditionally
+  aliased to `&g_entities[0]` and read 474 times, with only six assignment
+  sites. The largest task in the project. *Phase 2.*
+- **PLAYERONLY triggers** test `other->s.number != 0` (`g_trigger.cpp:194`,
+  `:646`) and `!activator->s.number` (`:134`). A second player will not trip
+  them, so scripted doors and elevators will not open for player 2.
+  *Phase 2.*
+- **NPC perception** is expected to hardcode `g_entities[0]`, as the
+  multiplayer port of the same code does. Unaudited in the singleplayer
+  tree. *Phase 3.*
+- **`cg_media.h:356`** sizes `clientinfo[MAX_CLIENTS]`, which now has two
+  entries. The client-game has five `MAX_CLIENTS` uses and has not been
+  examined for other single-player assumptions. *Phase 3.*
+- **The save format** writes one `GCLI` chunk. Four `level.clients[0]` sites
+  across two functions. *Phase 4.*

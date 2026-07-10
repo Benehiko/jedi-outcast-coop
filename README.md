@@ -8,12 +8,30 @@ campaign play (campaign maps, no cutscenes).
 Engine, renderer, and singleplayer gamecode build and run natively on
 Linux x86_64 against the retail Steam assets.
 
+Toward cooperative play: the singleplayer engine now accepts two clients,
+has a working UDP transport, and its server accepts a remote connection.
+The second client does not yet complete the handshake. See
+[docs/roadmap.md](docs/roadmap.md).
+
+## Documentation
+
+| Document | What it is |
+|---|---|
+| [roadmap.md](docs/roadmap.md) | **Start here.** What happens next, in phases, with tasks |
+| [widen-sp-progress.md](docs/widen-sp-progress.md) | What has been done on the current route |
+| [route-comparison.md](docs/route-comparison.md) | Why this route was chosen over hosting on the multiplayer tree |
+| [investigation-log.md](docs/investigation-log.md) | Everything tried, measured, and concluded — including the wrong turns |
+| [coop-design.md](docs/coop-design.md) | Superseded. The original study; its findings hold, its conclusion does not |
+
 ## Approach
 
 The game engine is not reverse engineered. Raven Software released the
 Jedi Outcast source under the GPL in 2013; [OpenJK](https://github.com/JACoders/OpenJK)
 maintains it. Only the retail assets (`assets*.pk3`) are proprietary,
 and they are used in place, unmodified.
+
+Changes to OpenJK live in `patches/` and are applied to a pinned submodule
+by `tools/apply-patches.sh`, rather than carrying a fork.
 
 ## Layout
 
