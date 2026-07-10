@@ -327,15 +327,45 @@ load test have now been retired. The entity spawn table is a smaller
 problem than estimated, and the NPC asset layer — which looked like the
 larger one — turned out to be a file copy.
 
-## Proposed first milestone
+## First milestone: reached
 
-Two players spawn on a campaign map, move around it together, and fight
-stormtroopers. ICARUS disabled, no saves.
+Two clients connect to a dedicated server running the campaign map
+`kejim_post` and both enter the game:
 
-Every component of this is now demonstrated individually: the map loads,
-the server accepts eight clients, the missing entities are non-fatal,
-and the enemies spawn. What remains is to connect two clients and
-confirm they see each other and the NPCs.
+    ClientConnect: 0 [127.0.0.1:29072] "Kyle^7"
+    ClientBegin: 0
+    ClientConnect: 1 [127.0.0.1:29073] "Jan^7"
+    ClientBegin: 1
+
+No disconnects, both client processes rendering.
+
+Reaching it required resolving three further instances of the same
+problem the NPC investigation uncovered: Jedi Academy's client code
+hardcodes Jedi Academy's asset paths, and Jedi Outcast ships equivalent
+data under different names.
+
+| Jedi Academy expects | Jedi Outcast ships | Fatal at init | Resolved by |
+|---|---|---|---|
+| `ext_data/Siege/Classes/*.scl` | nothing | yes | patch: non-fatal, Siege stays unavailable |
+| `ui/jampmenus.txt` | `ui/jk2mpmenus.txt` | yes | cvar `ui_menuFilesMP` |
+| `ui/jahud.txt` | `ui/jk2hud.txt` | yes | cvar `cg_hudFiles` |
+| `ui/jamp/menudef.h` | `ui/jk2mp/menudef.h` | no, but drops the client | patch: probe, fall back |
+
+Only the Siege and `menudef.h` cases needed source changes; both are in
+`codemp/ui/ui_main.c` and carried as `patches/0001-jk2-asset-paths-in-mp-ui.patch`.
+
+The `menudef.h` case is worth recording because it was nearly dismissed.
+Its symptom is a wall of parse errors that look cosmetic —
+`expected integer but found MENU_TRUE`. In fact, without the global
+defines every symbolic constant in Jedi Outcast's `.menu` files becomes
+an unparseable token, and the failure cascades into `DROPPED` during the
+connection handshake. Loading the correct header took the client from a
+dropped connection to `ClientBegin`.
+
+Campaign spawn points needed no work. `SP_info_player_start` aliases
+itself to `info_player_deathmatch` at `codemp/game/g_client.c:127-129`,
+so the multiplayer spawn selector handles campaign maps natively. The
+concern raised before the test was unfounded.
 
 ## Known remaining work
 
@@ -350,3 +380,16 @@ confirm they see each other and the NPCs.
   suppressed.
 - Weapon and item pickups (`item_bacta`, `item_battery`,
   `item_la_goggles`) have no multiplayer spawn function.
+- The server logs `WARNING: Entity used itself` roughly every thirteen
+  seconds during play. Not investigated. Likely an entity whose `target`
+  resolves to itself because its intended target was one of the dropped
+  classnames.
+- Broadcast messages print raw localization keys (`@@@PLCONNECT`,
+  `@@@DISCONNECTED`). Jedi Academy's `strip/` string tables differ from
+  Jedi Outcast's. Cosmetic.
+- The multiplayer gametype is FFA (`g_gametype 0`), so players can damage
+  each other and NPCs treat both as `TEAM_PLAYER` targets only
+  incidentally. A cooperative gametype, or friendly-fire and team
+  assignment, remains to be configured.
+- Whether the two clients render each other's player models in-world was
+  confirmed visually by the user, not by automated check.

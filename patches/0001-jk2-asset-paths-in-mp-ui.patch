@@ -1,0 +1,53 @@
+diff --git a/codemp/ui/ui_main.c b/codemp/ui/ui_main.c
+index 3375301f..c8c8e2c4 100644
+--- a/codemp/ui/ui_main.c
++++ b/codemp/ui/ui_main.c
+@@ -1421,16 +1421,29 @@ qboolean Load_Menu(int handle) {
+ void UI_LoadMenus(const char *menuFile, qboolean reset) {
+ 	pc_token_t token;
+ 	int handle;
++	fileHandle_t probe;
+ //	int start = trap->Milliseconds();
+ 
+-	trap->PC_LoadGlobalDefines ( "ui/jamp/menudef.h" );
++	// Jedi Outcast keeps the menu defines at ui/jk2mp/menudef.h. Without them
++	// every symbolic constant in its .menu files (MENU_TRUE, ITEM_ALIGN_CENTER,
++	// WINDOW_STYLE_FILLED, ...) fails to parse, which cascades into a dropped
++	// connection rather than a merely ugly menu.
++	if ( trap->FS_Open( "ui/jamp/menudef.h", &probe, FS_READ ) > 0 ) {
++		trap->FS_Close( probe );
++		trap->PC_LoadGlobalDefines( "ui/jamp/menudef.h" );
++	} else {
++		trap->PC_LoadGlobalDefines( "ui/jk2mp/menudef.h" );
++	}
+ 
+ 	handle = trap->PC_LoadSource( menuFile );
+ 	if (!handle) {
+ 		Com_Printf( S_COLOR_YELLOW "menu file not found: %s, using default\n", menuFile );
+ 		handle = trap->PC_LoadSource( "ui/jampmenus.txt" );
+ 		if (!handle) {
+-			trap->Error( ERR_DROP, S_COLOR_RED "default menu file not found: ui/jampmenus.txt, unable to continue!\n" );
++			handle = trap->PC_LoadSource( "ui/jk2mpmenus.txt" );
++		}
++		if (!handle) {
++			trap->Error( ERR_DROP, S_COLOR_RED "default menu file not found: ui/jampmenus.txt or ui/jk2mpmenus.txt, unable to continue!\n" );
+ 		}
+ 	}
+ 
+@@ -9539,8 +9552,14 @@ void UI_SiegeInit(void)
+ 	BG_SiegeLoadClasses(g_UIClassDescriptions);
+ 
+ 	if (!bgNumSiegeClasses)
+-	{ //We didn't find any?!
+-		Com_Error(ERR_DROP, "Couldn't find any player classes for Siege");
++	{
++		// Jedi Outcast ships no ext_data/Siege data, since Siege is a Jedi
++		// Academy gametype. This is called unconditionally at UI init, so a
++		// fatal error here makes the client unusable on Jedi Outcast assets.
++		// Siege itself remains unavailable; g_saga.c still errors if a Siege
++		// match is actually started.
++		Com_Printf("Siege player classes not found; Siege gametype unavailable.\n");
++		return;
+ 	}
+ 
+ 	//Now load the teams since we have class data.
