@@ -82,6 +82,34 @@ Then:
 
     cd openjk/build && ./openjo_sp.x86_64 +map kejim_post
 
+### One-command co-op install (Linux)
+
+`tools/install-coop.sh` does the staging above and adds two launcher
+commands. It only creates symlinks into your existing Steam install and
+small launcher scripts — it never copies or modifies retail files.
+
+    tools/install-coop.sh                        # autodetect Steam GameData
+    tools/install-coop.sh --gamedata /path/to/"Jedi Outcast"/GameData
+
+GameData is found under the standard Steam libraries (parsing
+`libraryfolders.vdf`); pass `--gamedata` if your install lives elsewhere
+(e.g. a NAS mount). The installer is idempotent, and `--uninstall` removes
+exactly what it created (tracked in a manifest) — retail files are never
+touched.
+
+It installs two launchers into `~/.local/bin`:
+
+    jk2coop-host [map]                 # host a co-op game on UDP 29070
+    jk2coop-join <host[:port]> [--second]
+
+`jk2coop-join`'s `--second` flag is for running a second client on the
+**same machine**: it gives that client its own clean `fs_homepath`
+(`/tmp/jk2-client2`, wiped first) with its own copy of the gamecode, since
+the game library is loaded from the home path.
+
+    jk2coop-host                       # machine/terminal 1
+    jk2coop-join 127.0.0.1 --second    # machine/terminal 2 (same box)
+
 ## Cooperative campaign
 
 **Route reversed.** See [docs/route-comparison.md](docs/route-comparison.md).
