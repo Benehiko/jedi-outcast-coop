@@ -75,7 +75,7 @@ index 81c702dc..6c0f0248 100644
  		oldindex++;
  
 diff --git a/code/server/sv_snapshot.cpp b/code/server/sv_snapshot.cpp
-index 149a0eb3..1d92767f 100644
+index 17a1b450..1d92767f 100644
 --- a/code/server/sv_snapshot.cpp
 +++ b/code/server/sv_snapshot.cpp
 @@ -60,6 +60,9 @@ static void SV_EmitPacketEntities( clientSnapshot_t *from, clientSnapshot_t *to,
@@ -130,12 +130,3 @@ index 149a0eb3..1d92767f 100644
  			}
  			oldindex++;
  			continue;
-@@ -706,7 +717,7 @@ void SV_SendClientMessages( void ) {
- 	client_t	*c;
- 
- 	// send a message to each connected client
--	for (i=0, c = svs.clients ; i < 1 ; i++, c++) {
-+	for (i=0, c = svs.clients ; i < MAX_CLIENTS ; i++, c++) {
- 		if (!c->state) {
- 			continue;		// not connected
- 		}
