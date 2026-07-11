@@ -174,3 +174,54 @@ MP, which force-sends clients per viewer via `SVF_BROADCASTCLIENTS`
 Verified: a temporary probe confirmed `player 1 force-sent to viewer 0`
 every frame across a two-client session, and the host renders the partner
 in an adjacent room; loopback regression still exits 0.
+
+## M3 — host players + NPCs render on the remote client (patch 0014)
+
+The remote client now rebuilds and renders other players' and NPCs' ghoul2
+models (previously invisible because the SP cgame reads them from the server
+gentity a serverless client lacks). Full design + implementation in
+[m3-remote-model-plan.md](m3-remote-model-plan.md). Summary: a `cg_remoteClient`
+flag; `level.clients` allocated on the remote client; the player model name
+networked via a new `model` key in the `CS_PLAYERS` configstring and NPC models
+via `s.modelindex`→`CS_MODELS`; the ghoul2 rebuilt client-side through the
+existing `G_SetG2PlayerModel`; animation driven from the networked
+`entityState.legsAnim`/`torsoAnim`.
+
+**Verified headlessly (2026-07-11)** with a new Xvfb + `screenshot_png` +
+ImageMagick harness (`tools/headless-verify.sh`) — this replaced the "headless
+can't render" belief; the real blocker had been window focus on the `:1` session
+throttling the loop, which a windowless Xvfb avoids. Temporary in-cgame probes
+confirmed on the remote client all four characters building their ghoul2 from the
+networked model name and entering the render path: players ent#0/#1 model
+`kyle`, NPCs ent#354/#356 models `jan`/`kyle` (from `CS_MODELS`), each followed
+by `RENDERING character ent#…`. Client frames were confirmed real 3D views
+(mean ~0.09, ~13k colours). The probes were removed before the patch was
+finalised.
+
+## M4 — sustained two-client soak, no crash
+
+Milestone gate: "both players fight the same stormtrooper for 10 minutes, no
+crash." Split into what can and cannot be driven headlessly:
+
+- **Render-stability (headless, PASSED).** `tools/soak-m4.sh` runs the host +
+  a dual-load remote client under Xvfb, the client under gdb, with a wall-clock
+  duration control and a handful of persistent NPCs. In a 10-minute run
+  (2026-07-11) the remote client rendered the host player + NPCs continuously,
+  stayed connected the whole time (the host still logged the client's packets at
+  the 10-minute teardown), and **crashed zero times** — gdb captured no signal.
+  The `inPVS`/`trace` import stubs fired throughout without incident. This
+  exercises the whole M3 render path (build + lerp + draw players and NPCs) under
+  sustained load, which is the crash surface M4 is about.
+- **Active-combat (needs a human).** The literal spec — both players *fighting* —
+  requires player input the headless harness cannot inject (no keyboard/mouse
+  into the client). A windowed session with a human driving the client is still
+  wanted to certify combat-input paths (firing, taking damage, death/respawn as
+  the *local* player on the remote client). Render-side death/effects for OTHER
+  entities are covered by the soak.
+
+Harness caveats found and worked around: spawning NPCs on a tight loop while the
+host player is AFK exhausts the entity pool (`G_Spawn: no free entities`) and
+takes the *host* down — a harness artifact, not a remote-client bug; the soak
+now spawns a small fixed set. Also, the client goes quiet in its log once its
+screenshot chain ends (it just idle-renders) — "survived N s" must be read from
+the wall-clock process-alive check, not the log-timestamp span.
