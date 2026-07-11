@@ -106,8 +106,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jk2coop-windows
+          # MSVC names the engine openjo_sp.x86_64.exe (matching the Linux
+          # openjo_sp.x86_64), not openjo_sp.exe. Fail loudly if the exe is
+          # ever missing rather than silently shipping DLLs with no engine.
           path: |
-            openjk/build/**/openjo_sp.exe
+            openjk/build/**/openjo_sp.x86_64.exe
             openjk/build/**/jospgamex86_64.dll
             openjk/build/**/rdjosp-vanilla_x86_64.dll
-          if-no-files-found: warn
+          if-no-files-found: error
