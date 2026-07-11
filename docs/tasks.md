@@ -27,8 +27,9 @@ Landed, verified headlessly (Xvfb + `screenshot_png` + gdb; see
   10-minute soak. A6 audited — the `entityStateFields` assert already holds in
   the Debug build, no change needed.
 - **Track C**: C1 (Linux installer, `tools/install-coop.sh`), C2 (CI,
-  `.github/workflows/build.yml`), C3 (winsock, patch **0016**) all done. Patch
-  0007 was regenerated so `apply-patches.sh` runs clean from a fresh checkout.
+  `.github/workflows/build.yml`), C3 (winsock, patch **0016**), and C5 (macOS
+  installer, `tools/install-coop-macos.sh`) all done. Patch 0007 was regenerated
+  so `apply-patches.sh` runs clean from a fresh checkout.
 - **Track D**: D1 (`coop_host`, patch **0017**), D2 (`localservers` LAN
   discovery, patch **0018**), and D3 (co-op menu, engine patch **0019** + the
   `zz-coop-ui.pk3` overlay in `assets/coop-ui/`) all done — the menu, its
@@ -38,10 +39,13 @@ Landed, verified headlessly (Xvfb + `screenshot_png` + gdb; see
 Actual patch numbers diverged from the parentheticals below (C3 is 0016 not
 0015; A6 needed no patch; D1/D2/D3 are 0017/0018/0019). The headless harness
 CAN render + screenshot menus (`uimenu coopMenu` under Xvfb), so menu work is
-verifiable. Remaining work still needs a human or a Windows box: **M4
-active-combat** (both players fighting 10 min — needs client input injection),
-**C4** (Windows installer — needs a Windows box + green C2 Windows leg), and
-**Track E** (four players — gated on a fully-playable 2-player M4). The only
+verifiable. **Track E** (four players) is now done — patch **0020** raises the
+cap to four and fixes the loopback qport collision that kept extra same-IP
+joiners out; a host + three joiners were verified headless. Remaining work still
+needs a human or another OS: **M4 active-combat** (both players fighting 10 min
+— needs client input injection), **C4** (Windows installer — needs a Windows box
++ green C2 Windows leg), and **C5** on a real Mac (logic validated on Linux
+against a mock build tree). The only
 D3 piece not machine-verified is mouse-clicking the buttons; the verb code
 paths and the menu/feeder rendering are confirmed.
 
@@ -213,6 +217,24 @@ modify the retail install (add files only).
   exactly the copied files.
   Done: on Windows with Steam JK2: install → host a game → second
   machine joins; uninstall leaves the retail dir byte-identical.
+
+- [x] **C5 — macOS installer.** (no patch — outer repo only)
+  Needs: T0. Not in the original plan; added alongside C1.
+  Do: `tools/install-coop-macos.sh`, the macOS counterpart of C1 with
+  the platform differences handled: data dir under
+  `~/Library/Application Support/OpenJO`, launchers in `~/bin`, GameData
+  autodetected under `~/Library/Application Support/Steam`
+  (`libraryfolders.vdf` + `--gamedata` override), engine resolved as
+  either an `openjo_sp.app` bundle or a plain `openjo_sp.<arch>` binary,
+  gamecode/renderer `.dylib`s named per architecture (`x86_64`/`arm64`,
+  `JK2_ARCH` override), same idempotent re-run and non-destructive
+  `--uninstall`. Kept portable (no `tac`/`tail -r`).
+  Done: shellcheck clean; logic validated on this Linux box against a
+  mock macOS build tree (both `.app` and plain-binary forms, autodetect,
+  idempotent re-run with no manifest dupes, uninstall that removes only
+  what it created and preserves a pre-existing `~/bin` file, retail
+  GameData left intact). Not yet exercised on a real Mac — that's the
+  one remaining check, like C4 needs a real Windows box.
 
 ---
 

@@ -116,6 +116,31 @@ the game library is loaded from the home path.
     jk2coop-host                       # machine/terminal 1
     jk2coop-join 127.0.0.1 --second    # machine/terminal 2 (same box)
 
+### One-command co-op install (macOS)
+
+`tools/install-coop-macos.sh` is the macOS counterpart. It works the same
+way — symlinks the retail assets and the co-op gamecode into the engine data
+directory and drops the two launchers — with the platform differences handled
+for you:
+
+    tools/install-coop-macos.sh                  # autodetect Steam GameData
+    tools/install-coop-macos.sh --gamedata "/path/to/Jedi Outcast/GameData"
+
+- The data directory is `~/Library/Application Support/OpenJO`; the launchers
+  go in `~/bin`.
+- GameData is found under `~/Library/Application Support/Steam` (parsing
+  `libraryfolders.vdf`); pass `--gamedata` if it lives elsewhere.
+- The engine is used whether it built as an `openjo_sp.app` bundle or a plain
+  `openjo_sp.<arch>` binary (both are autodetected), and the gamecode/renderer
+  `.dylib`s carry the build architecture (`x86_64` or `arm64`). The build
+  architecture defaults to the current machine; override with `JK2_ARCH` if you
+  cross-built.
+- `--uninstall` and idempotent re-runs behave exactly as the Linux installer;
+  retail files are never touched.
+
+The launchers (`jk2coop-host`, `jk2coop-join`) and their `--second` flag work
+identically to the Linux ones described above.
+
 ### Hosting and finding games from the console
 
 You can also host from a game that is already running, with no launch flags:
