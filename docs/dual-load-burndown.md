@@ -146,17 +146,31 @@ weapon + HUD — confirmed on screen).
   (`cg.refdef.vieworg`/`viewaxis`), which is snapshot-derived and valid on
   both host and remote client.
 
-## Known-open: host cannot always see networked entities
+## Resolved: host / partner did not always see the other player (patch 0013)
 
-Separate from the client crashes above. In a two-client session the *host*
-(client 0) intermittently does not render the second player or the campaign
-NPCs, though collision and damage against them work (server has the
-entities). They appear when in the host's PVS and vanish otherwise —
-pointing at snapshot *content*, not the render path (which is shared and
-symmetric between host and remote). Prime suspect: `sv_snapshot.cpp:428`,
-where the SP "always send" test `( ent->svFlags & SVF_BROADCAST || !e )`
-force-adds only entity 0 to every frame; other clients and NPCs must pass
-the PVS/area cull, unlike MP which force-sends clients per viewer
-(`codemp/server/sv_snapshot.cpp:443`, `e == frame->ps.clientNum`).
-Next step is a probe in `CG_AddPacketEntities` to confirm server-side
-(absent from snapshot) vs client-side (present, not drawn) before fixing.
+Reported as "the host can't see the second player or the NPCs, but shooting
+them works." Diagnosed with two temporary probes — one in
+`CG_AddPacketEntities` dumping each viewer's `cg.snap` entity list, one in
+`SV_AddEntitiesVisibleFromPoint` naming the gate that dropped entity 1.
+
+Finding: **this was correct PVS culling, not a render bug.** The probes
+showed both players' snapshots are built identically and the render path is
+shared; the only always-sent entity was entity 0, because the SP "always
+send" test `( ent->svFlags & SVF_BROADCAST || !e )` force-adds *only* the
+viewer's own entity 0. Every other entity — the other player and the NPCs —
+had to pass the PVS/area cull. When the two players stood in the same map
+area they saw each other and all shared NPCs (snapshot of ~105 entities
+including `1c`); when they were in different areas the other player was
+correctly culled (snapshot of ~13, no `1c`). NPCs "worked" only because
+they happened to share the players' PVS leaves.
+
+For co-op this culling is wrong-feeling: partners should not vanish when
+they step into the next room. Fix (patch 0013, `sv_snapshot.cpp`): widen
+the always-send test from `!e` to `e < MAX_CLIENTS`, so **every connected
+player is force-sent to every viewer** regardless of PVS. Unused client
+slots are already filtered by the earlier `!ent->inuse` check. This mirrors
+MP, which force-sends clients per viewer via `SVF_BROADCASTCLIENTS`
+(`codemp/server/sv_snapshot.cpp:443`). NPCs still follow normal PVS.
+Verified: a temporary probe confirmed `player 1 force-sent to viewer 0`
+every frame across a two-client session, and the host renders the partner
+in an adjacent room; loopback regression still exits 0.
