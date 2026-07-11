@@ -295,40 +295,45 @@ black is still a passing test).
 ## Track E — four players
 
 Background: plan § Workstream E. **Gate: Track A at milestone M4** (two
-players fully playable). One patch (0019) for E1+E2.
+players fully playable). E1+E2+E3 shipped together as patch **0020**
+(the plan's "0019 for E1+E2" slot was taken by D3's co-op menu).
 
-- [ ] **E1 — `sv_maxclients` cvar.**
-  Needs: A-M4.
-  Do: register `sv_maxclients` (latched, default 2, clamped 1–
-  `MAX_CLIENTS`); bound the client *loops* by the cvar while
-  *allocations* stay `MAX_CLIENTS`-sized. The 13 engine sites and 2
-  gamecode sites are listed in patch 0004 — that patch is the map of
-  what to touch. Wire D1's stored `maxplayers` into it if D1 landed.
-  Done: `sv_maxclients 1` refuses a second client; `2` accepts one;
-  loopback regression passes.
+- [x] **E1 — `sv_maxclients` cvar.** (patch 0020)
+  Registered `sv_maxclients` (latched, default 2, clamped 1–
+  `MAX_CLIENTS`) in `sv_init.cpp`; `SV_DirectConnect`'s free-slot loop
+  is now bounded by the cvar (`maxConnect`) while allocations stay
+  `MAX_CLIENTS`-sized. `SVC_Info` reports the cvar. `SV_CoopHost_f`
+  sets it from its arg (re-`Cvar_Get` to apply the latch). Verified
+  headless: `sv_maxclients 1` refuses a joiner with "Server is full"
+  (connectResponse 0); `2` accepts one (2 `ClientEnterWorld`,
+  connectResponse 1); loopback boots clean.
 
-- [ ] **E2 — raise the cap.**
-  Needs: E1.
-  Do: `#define MAX_CLIENTS 4` (`code/qcommon/q_shared.h:618`) **and
-  bump `PROTOCOL_VERSION`** in the same commit — `CS_LIGHT_STYLES =
-  CS_PLAYERS + MAX_CLIENTS` renumbers every later configstring, so a
-  2-client build must be rejected at connect, not left to desync
-  (plan § E items 1–2).
-  Done: old-build client is refused with a protocol error; loopback
-  regression passes; two-client test unchanged.
+- [x] **E2 — raise the cap.** (patch 0020)
+  `#define MAX_CLIENTS 4` (`q_shared.h:618`) and `PROTOCOL_VERSION 41`
+  (`qcommon.h:206`) in the same patch — the `CS_LIGHT_STYLES =
+  CS_PLAYERS + MAX_CLIENTS` renumber shifts every later configstring,
+  so a stale 2-client build is now rejected at connect on the protocol
+  bump instead of silently desyncing. `svs.numSnapshotEntities`
+  (`MAX_CLIENTS * 4 * 64`) auto-scales — no manual change. Builds
+  clean; loopback + two-client tests unchanged.
 
-- [ ] **E3 — four-player verification.**
-  Needs: E2.
-  Do: host + three joiners (at least one on another machine; the local
-  ones each need their own wiped `fs_homepath`). Verify all four spawn
-  clear on `kejim_post`'s single spawn point (patch 0008's ring — plan
-  § E item 3). Play a 10-minute firefight. Watch server output for
-  snapshot-ring warnings (plan § E item 2); if they appear, raise the
-  `4` backup factor in `svs.numSnapshotEntities` and note the change.
-  Re-check any A5 guards that assumed clientNum ∈ {0,1}.
-  Done: 10 minutes, four players, shared firefight, zero crashes, zero
-  snapshot warnings. Record the session in the commit message — this
-  is the project's headline milestone.
+- [x] **E3 — four-player verification.** (patch 0020)
+  Host + 3 dual-load joiners on `kejim_post` under one Xvfb, each with
+  its own wiped `fs_homepath` + gamecode symlink and a distinct name.
+  **All four entered the world** (0 "Server is full", 0 snapshot-ring
+  warnings, 0 crashes) and **all three clients dual-loaded and rendered
+  real 3D frames** (ImageMagick mean ≈0.15, ~10k colours — far above
+  the black-screen floor). Patch 0008's spawn ring keeps them clear.
+  **Root cause found + fixed en route:** multiple same-IP loopback
+  clients all seeded `net_qport` from `Com_Milliseconds()`, which is
+  ≈0 this early in startup, so their qports collided and
+  `SV_DirectConnect` reconnected joiner 2/3 into joiner 1's slot —
+  only one ever entered. Fix (both in 0020): seed `net_qport` with the
+  process id (new `Sys_GetProcessId()`, unix + win32) so same-host
+  clients get distinct qports, and match the reuse loop on qport alone
+  (drop the loopback-hostile `|| from.port == remoteAddress.port`
+  clause, which `SV_PacketEvent` never needed either). This is the
+  project's headline milestone.
 
 ---
 

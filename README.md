@@ -8,14 +8,16 @@ campaign play (campaign maps, no cutscenes).
 Engine, renderer, and singleplayer gamecode build and run natively on
 Linux x86_64 against the retail Steam assets.
 
-Toward cooperative play: the singleplayer engine accepts two clients over
-a restored UDP transport with real entity serialisation. A second client
-connects (LAN included), spawns clear of the host, and now **renders its own
-view** — the dual-loaded cgame draws the world, the HUD, and the host player
-and NPCs, verified crash-free over a 10-minute soak. Hosting, LAN discovery,
-and an in-game Co-op menu are in; a one-command Linux installer stages it all.
-Still open: verifying active two-player combat in a live windowed session, the
-Windows build/installer, and raising the cap to four players. The plan is in
+Toward cooperative play: the singleplayer engine accepts **up to four
+clients** (`sv_maxclients`, default 2) over a restored UDP transport with
+real entity serialisation. Joiners connect (LAN included), spawn clear of the
+host, and **render their own view** — the dual-loaded cgame draws the world,
+the HUD, and the host player and NPCs, verified crash-free over a 10-minute
+soak. A four-player session (host + three joiners) has been verified headless:
+all four enter the world and every client renders. Hosting, LAN discovery, and
+an in-game Co-op menu are in; a one-command Linux installer stages it all.
+Still open: verifying active multi-player combat in a live windowed session and
+the Windows build/installer. The plan is in
 [docs/implementation-plan.md](docs/implementation-plan.md); the roadmap is
 [docs/roadmap.md](docs/roadmap.md); current task status is in
 [docs/tasks.md](docs/tasks.md).
@@ -119,7 +121,8 @@ the game library is loaded from the home path.
 You can also host from a game that is already running, with no launch flags:
 
     coop_host [maxplayers]      # open the network socket for the current game
-                               # prints the port a second machine should join
+                               # maxplayers 1-4 (default 2); sets sv_maxclients
+                               # prints the port other machines should join
 
 And a joiner can discover co-op hosts on the local network instead of typing an
 IP:
