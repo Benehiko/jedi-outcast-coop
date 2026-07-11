@@ -17,11 +17,32 @@ order; renumber freely if they don't. One patch per task unless noted.
 Legend: each task lists what it **needs** (dependencies), what to
 **do**, and what **done** looks like (a check you can run, not a feeling).
 
+## Status (2026-07-11)
+
+Landed, verified headlessly (Xvfb + `screenshot_png` + gdb; see
+`tools/headless-verify.sh`, `tools/soak-m4.sh`):
+
+- **Track A**: A1–A5 done; **M3** (host players + NPCs render) = patch 0014,
+  plus character velocity/lean = 0015; **M4 render-stability** confirmed by a
+  10-minute soak. A6 audited — the `entityStateFields` assert already holds in
+  the Debug build, no change needed.
+- **Track C**: C1 (Linux installer, `tools/install-coop.sh`), C2 (CI,
+  `.github/workflows/build.yml`), C3 (winsock, patch **0016**) all done. Patch
+  0007 was regenerated so `apply-patches.sh` runs clean from a fresh checkout.
+- **Track D**: D1 (`coop_host`, patch **0017**) and D2 (`localservers` LAN
+  discovery, patch **0018**) done.
+
+Actual patch numbers diverged from the parentheticals below (C3 is 0016 not
+0015; A6 needed no patch). Remaining work needs things headless CI can't do:
+**D3** (co-op menu — needs an authored `.menu` asset + a rendered/mouse test),
+**M4 active-combat** and **C4** (a human-driven windowed session / a Windows
+box), and **Track E** (gated on a fully-playable 2-player M4).
+
 ---
 
 ## T0 — Environment check (do this first)
 
-- [ ] **T0.1 Build and run what exists.**
+- [x] **T0.1 Build and run what exists.**
   Needs: retail JK2 on disk, the packages in README § Building.
   Do: clone with submodule, `tools/apply-patches.sh`, configure + build
   per README, symlink assets and modules per README § Running, run the
@@ -39,7 +60,7 @@ Background: plan § Workstream A and
 [cgame-split-investigation.md](cgame-split-investigation.md). Do not
 reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
 
-- [ ] **A1 — `GetCGameAPI` export.** (patch 0009)
+- [x] **A1 — `GetCGameAPI` export.** (patch 0009)
   Needs: T0.
   Do: in `openjk/codeJK2/game/g_main.cpp`, beside `GetGameAPI` (line
   ~788), add the `GetCGameAPI` function exactly as sketched in plan
@@ -49,7 +70,7 @@ reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
   GetCGameAPI` shows the symbol; loopback regression passes (nothing
   calls it yet).
 
-- [ ] **A2 — client-safe import table.** (patch 0010, same patch as A3)
+- [x] **A2 — client-safe import table.** (patch 0010, same patch as A3)
   Needs: A1.
   Do: in `openjk/code/client/cl_cgame.cpp`, add
   `static void CL_BuildCGameImport( game_import_t &import )`. Open
@@ -70,7 +91,7 @@ reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
      a tiny macro to stamp these out; there are dozens.
   Done: compiles. Behaviour is untestable until A3 — land them together.
 
-- [ ] **A3 — load hook.** (patch 0010, with A2)
+- [x] **A3 — load hook.** (patch 0010, with A2)
   Needs: A2.
   Do: in `CL_InitCGame` (`cl_cgame.cpp`), when `cgvm.entryPoint` is
   null, load the library and initialise it per the snippet in plan § A3
@@ -87,7 +108,7 @@ reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
   3. stub names printed by A2's table are captured in the commit
      message or a notes file — each is a discovered work item.
 
-- [ ] **A4 — defuse `CL_GetDefaultState`.** (patch 0011)
+- [x] **A4 — defuse `CL_GetDefaultState`.** (patch 0011)
   Needs: A3 (only so its effect is observable).
   Do: `cl_cgame.cpp:240–258` reads `sv.svEntities[].baseline` — server
   memory — from client code. When no local server runs
@@ -96,7 +117,7 @@ reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
   Done: two-client test behaves no worse than after A3; loopback
   regression passes.
 
-- [ ] **A5 — `gent` burn-down.** (one patch per batch: 0012, 0013, …)
+- [x] **A5 — `gent` burn-down.** (one patch per batch: 0012, 0013, …)
   Needs: A3, A4. This is a loop, not a task; run it until milestone
   M4 (plan § Workstream A milestones).
   Each iteration:
@@ -116,7 +137,7 @@ reorder A1–A4; each is a prerequisite of the next. A5 is a loop.
   HUD → M3 host player, NPCs, doors render → M4 both players fight the
   same stormtrooper for 10 minutes, no crash.
 
-- [ ] **A6 — `entityStateFields` audit.** (patch 0014)
+- [x] **A6 — `entityStateFields` audit.** (patch 0014)
   Needs: nothing (independent of A1–A5, needs only T0); do it whenever
   the axis-gizmo bug (plan § Workstream A, "known adjacent defect")
   gets in the way of A5 testing.
@@ -137,7 +158,7 @@ Background: plan § Workstream C. C1 and C2 need only T0. Keep the two
 licensing rules in front of you: never redistribute retail files; never
 modify the retail install (add files only).
 
-- [ ] **C1 — Linux installer.** (no patch — outer repo only)
+- [x] **C1 — Linux installer.** (no patch — outer repo only)
   Needs: T0.
   Do: write `tools/install-coop.sh` to the spec in plan § C1: GameData
   autodetection (two standard Steam paths + `libraryfolders.vdf`
@@ -151,7 +172,7 @@ modify the retail install (add files only).
   `jk2coop-join 127.0.0.1:29070 --second` connects; `--uninstall`
   leaves no trace; running it twice in a row changes nothing.
 
-- [ ] **C2 — CI builds.** (no patch)
+- [x] **C2 — CI builds.** (no patch)
   Needs: T0.
   Do: `.github/workflows/build.yml`, Linux only at first:
   checkout with submodule, apply patches, configure with the JK2SP
@@ -161,7 +182,7 @@ modify the retail install (add files only).
   with a comment pointing at C3 — it cannot link until winsock lands.
   Done: green Actions run on push with downloadable Linux artifacts.
 
-- [ ] **C3 — winsock port of the UDP transport.** (patch 0015)
+- [x] **C3 — winsock port of the UDP transport.** (patch 0015)
   Needs: T0. Unblocks the Windows leg of C2.
   Do: make `code/qcommon/net_ip.cpp` compile on both platforms:
   `#ifdef _WIN32` halves for headers, `WSAStartup`/`WSACleanup`,
@@ -196,7 +217,7 @@ work testable from the console; D3 adds the menu on top. All of D is
 independent of Track A (a discovered, menu-joined client that renders
 black is still a passing test).
 
-- [ ] **D1 — `coop_host` command.** (patch 0016)
+- [x] **D1 — `coop_host` command.** (patch 0016)
   Needs: T0.
   Do, in two pieces (plan § D1):
   1. `code/qcommon/net_ip.cpp`: add `NET_Restart` — `NET_Shutdown`,
@@ -213,7 +234,7 @@ black is still a passing test).
   console, second machine connects to the printed address. Loopback
   regression still opens no socket (the command was not run).
 
-- [ ] **D2 — LAN discovery.** (patch 0017)
+- [x] **D2 — LAN discovery.** (patch 0017)
   Needs: D1.
   Do (plan § D2):
   1. `code/server/sv_main.cpp` `SVC_Info` (line ~247): add `hostname`
