@@ -54,9 +54,15 @@ Legend: each task lists what it **needs** (dependencies), what to
   0005 links `wsock32` into the JK2SP engine, fixing the 13 winsock
   `LNK2019` unresolved externals (`WSAStartup`, `socket`, `bind`,
   `sendto`, …) that patch 0016's `net_ip.cpp` introduced but never
-  linked, so the CI `jk2coop-windows` artifact now builds. The
-  installer script (`install-coop.ps1`) is still to be written and
-  validated on a Windows box.
+  linked, so the CI `jk2coop-windows` artifact now builds (the artifact
+  glob was also corrected: the engine is `openjo_sp.x86_64.exe`, not
+  `openjo_sp.exe`). The installer `tools/install-coop.ps1` is written —
+  it autodetects `GameData` via the Steam registry key +
+  `libraryfolders.vdf`, stages the co-op files additively (retail
+  untouched), writes host/join `.cmd` launchers, and supports
+  `-Uninstall`; its logic is verified end-to-end on a mock tree. What
+  remains is running it against a real retail install on a live Windows
+  machine and confirming the engine hosts/joins there.
 - **C6 — macOS real-hardware verification**: `install-coop-macos.sh` is
   shellcheck-clean and validated against a mock build tree on Linux; it
   has not yet been run on a real Mac.
