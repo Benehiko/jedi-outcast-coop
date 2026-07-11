@@ -1,0 +1,24 @@
+diff --git a/codeJK2/cgame/cg_players.cpp b/codeJK2/cgame/cg_players.cpp
+index fc41fed4..86d13351 100644
+--- a/codeJK2/cgame/cg_players.cpp
++++ b/codeJK2/cgame/cg_players.cpp
+@@ -4917,6 +4917,19 @@ void CG_Player( centity_t *cent ) {
+ 		return;
+ 	}
+ 
++	// M3: on the remote client the gentity playerState is not simulated, so the
++	// leg-yaw-from-movement and lean code (CG_PlayerAngles and friends) would read
++	// a zeroed ps.velocity and never turn/lean the character. Sync the fields
++	// those paths need from the networked entityState: velocity is pos.trDelta,
++	// plus groundEntityNum and eFlags. Cheap, once per player per frame; no-op on
++	// the host (cg_remoteClient false), which has the real simulated ps.
++	if ( cg_remoteClient )
++	{
++		VectorCopy( cent->currentState.pos.trDelta, cent->gent->client->ps.velocity );
++		cent->gent->client->ps.groundEntityNum = cent->currentState.groundEntityNum;
++		cent->gent->client->ps.eFlags = cent->currentState.eFlags;
++	}
++
+ 	//Get the player's light level for stealth calculations
+ 	CG_GetPlayerLightLevel( cent );
+ 
