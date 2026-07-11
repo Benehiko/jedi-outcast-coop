@@ -257,7 +257,7 @@ black is still a passing test).
   `connect` to the printed address works. A stock JA server on the LAN
   (if handy) does not appear.
 
-- [ ] **D3 — Co-op menu.** (patch 0018 + new committed asset + tool change)
+- [x] **D3 — Co-op menu.** (patch 0018 + new committed asset + tool change)
   Needs: D1, D2. Split across three commits if convenient:
   1. **Overlay pk3 plumbing** (outer repo): create `assets/coop-ui/`
      holding original-authorship menu files (write from scratch — plan

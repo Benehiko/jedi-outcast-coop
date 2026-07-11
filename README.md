@@ -10,11 +10,15 @@ Linux x86_64 against the retail Steam assets.
 
 Toward cooperative play: the singleplayer engine accepts two clients over
 a restored UDP transport with real entity serialisation. A second client
-connects (LAN included), spawns clear of the host, moves, and replicates
-to the host's screen. It does not yet render its own view — its cgame
-never initialises without a local server. The fix is planned in
+connects (LAN included), spawns clear of the host, and now **renders its own
+view** — the dual-loaded cgame draws the world, the HUD, and the host player
+and NPCs, verified crash-free over a 10-minute soak. Hosting, LAN discovery,
+and an in-game Co-op menu are in; a one-command Linux installer stages it all.
+Still open: verifying active two-player combat in a live windowed session, the
+Windows build/installer, and raising the cap to four players. The plan is in
 [docs/implementation-plan.md](docs/implementation-plan.md); the roadmap is
-[docs/roadmap.md](docs/roadmap.md).
+[docs/roadmap.md](docs/roadmap.md); current task status is in
+[docs/tasks.md](docs/tasks.md).
 
 ## Documentation
 
@@ -123,8 +127,7 @@ IP:
     localservers                # broadcasts on the LAN; prints each co-op host
                                # found, with its name, map, and player count
 
-`sv_hostname` sets the name shown in that list (it defaults to your player
-name). Both commands are the plumbing the in-game Co-op menu will drive.
+The in-game Co-op menu (`uimenu coopMenu`, shipped in `zz-coop-ui.pk3`) drives both from buttons: Host, a LAN server list with Refresh/Join, and a direct-connect field. `sv_hostname` sets the name shown in the list.
 
 ## Cooperative campaign
 
