@@ -1,0 +1,212 @@
+diff --git a/code/qcommon/net_ip.cpp b/code/qcommon/net_ip.cpp
+index 0f9a7ef8..15438032 100644
+--- a/code/qcommon/net_ip.cpp
++++ b/code/qcommon/net_ip.cpp
+@@ -22,18 +22,45 @@ every interface by default (net_ip "0.0.0.0") so a LAN client can reach it.
+ #include "q_shared.h"
+ #include "qcommon.h"
+ 
+-#include <arpa/inet.h>
+-#include <errno.h>
+-#include <netdb.h>
+-#include <netinet/in.h>
+-#include <sys/socket.h>
+-#include <sys/types.h>
+-#include <sys/select.h>
+-#include <unistd.h>
+-#include <fcntl.h>
+-
+-#define INVALID_SOCKET (-1)
+-#define SOCKET_ERROR   (-1)
++// Cross-platform socket layer. The POSIX and winsock APIs differ only in a
++// handful of spellings; unify them the same way codemp/qcommon/net_ip.cpp does
++// so the identical socket code below compiles on both. Only the syscall names
++// change — the behaviour is unchanged.
++#ifdef _WIN32
++	#include <winsock.h>
++
++	typedef int socklen_t;
++
++	#undef EAGAIN
++	#undef EADDRNOTAVAIL
++	#undef ECONNRESET
++
++	#define EAGAIN WSAEWOULDBLOCK
++	#define EADDRNOTAVAIL WSAEADDRNOTAVAIL
++	#define ECONNRESET WSAECONNRESET
++
++	#define socketError WSAGetLastError( )
++
++	static WSADATA winsockdata;
++	static qboolean winsockInitialized = qfalse;
++#else
++	#include <arpa/inet.h>
++	#include <errno.h>
++	#include <netdb.h>
++	#include <netinet/in.h>
++	#include <sys/ioctl.h>
++	#include <sys/socket.h>
++	#include <sys/types.h>
++	#include <sys/select.h>
++	#include <unistd.h>
++
++	typedef int SOCKET;
++	#define INVALID_SOCKET (-1)
++	#define SOCKET_ERROR   (-1)
++	#define closesocket    close
++	#define ioctlsocket    ioctl
++	#define socketError    errno
++#endif
+ 
+ static int   ip_socket = INVALID_SOCKET;
+ 
+@@ -47,7 +74,50 @@ NET_ErrorString
+ ====================
+ */
+ const char *NET_ErrorString( void ) {
+-	return strerror( errno );
++#ifdef _WIN32
++	switch ( socketError ) {
++	case WSAEINTR:           return "WSAEINTR";
++	case WSAEBADF:           return "WSAEBADF";
++	case WSAEACCES:          return "WSAEACCES";
++	case WSAEFAULT:          return "WSAEFAULT";
++	case WSAEINVAL:          return "WSAEINVAL";
++	case WSAEMFILE:          return "WSAEMFILE";
++	case WSAEWOULDBLOCK:     return "WSAEWOULDBLOCK";
++	case WSAEINPROGRESS:     return "WSAEINPROGRESS";
++	case WSAEALREADY:        return "WSAEALREADY";
++	case WSAENOTSOCK:        return "WSAENOTSOCK";
++	case WSAEDESTADDRREQ:    return "WSAEDESTADDRREQ";
++	case WSAEMSGSIZE:        return "WSAEMSGSIZE";
++	case WSAEPROTOTYPE:      return "WSAEPROTOTYPE";
++	case WSAENOPROTOOPT:     return "WSAENOPROTOOPT";
++	case WSAEPROTONOSUPPORT: return "WSAEPROTONOSUPPORT";
++	case WSAESOCKTNOSUPPORT: return "WSAESOCKTNOSUPPORT";
++	case WSAEOPNOTSUPP:      return "WSAEOPNOTSUPP";
++	case WSAEPFNOSUPPORT:    return "WSAEPFNOSUPPORT";
++	case WSAEAFNOSUPPORT:    return "WSAEAFNOSUPPORT";
++	case WSAEADDRINUSE:      return "WSAEADDRINUSE";
++	case WSAEADDRNOTAVAIL:   return "WSAEADDRNOTAVAIL";
++	case WSAENETDOWN:        return "WSAENETDOWN";
++	case WSAENETUNREACH:     return "WSAENETUNREACH";
++	case WSAENETRESET:       return "WSAENETRESET";
++	case WSAECONNABORTED:    return "WSAECONNABORTED";
++	case WSAECONNRESET:      return "WSAECONNRESET";
++	case WSAENOBUFS:         return "WSAENOBUFS";
++	case WSAEISCONN:         return "WSAEISCONN";
++	case WSAENOTCONN:        return "WSAENOTCONN";
++	case WSAESHUTDOWN:       return "WSAESHUTDOWN";
++	case WSAETIMEDOUT:       return "WSAETIMEDOUT";
++	case WSAECONNREFUSED:    return "WSAECONNREFUSED";
++	case WSAEHOSTDOWN:       return "WSAEHOSTDOWN";
++	case WSAEHOSTUNREACH:    return "WSAEHOSTUNREACH";
++	case WSASYSNOTREADY:     return "WSASYSNOTREADY";
++	case WSAVERNOTSUPPORTED: return "WSAVERNOTSUPPORTED";
++	case WSANOTINITIALISED:  return "WSANOTINITIALISED";
++	default:                 return "NO ERROR";
++	}
++#else
++	return strerror( socketError );
++#endif
+ }
+ 
+ /*
+@@ -171,9 +241,10 @@ static int NET_IPSocket( const char *net_interface, int port ) {
+ 	}
+ 
+ 	// make it non-blocking; the engine polls rather than waits
+-	if ( fcntl( newsocket, F_SETFL, O_NONBLOCK ) == SOCKET_ERROR ) {
+-		Com_Printf( "WARNING: NET_IPSocket: O_NONBLOCK: %s\n", NET_ErrorString() );
+-		close( newsocket );
++	u_long _true = 1;
++	if ( ioctlsocket( newsocket, FIONBIO, &_true ) == SOCKET_ERROR ) {
++		Com_Printf( "WARNING: NET_IPSocket: FIONBIO: %s\n", NET_ErrorString() );
++		closesocket( newsocket );
+ 		return INVALID_SOCKET;
+ 	}
+ 
+@@ -189,7 +260,7 @@ static int NET_IPSocket( const char *net_interface, int port ) {
+ 		|| !Q_stricmp( net_interface, "0.0.0.0" ) ) {
+ 		address.sin_addr.s_addr = INADDR_ANY;
+ 	} else if ( !Sys_StringToSockaddr( net_interface, &address ) ) {
+-		close( newsocket );
++		closesocket( newsocket );
+ 		return INVALID_SOCKET;
+ 	}
+ 
+@@ -197,7 +268,7 @@ static int NET_IPSocket( const char *net_interface, int port ) {
+ 
+ 	if ( bind( newsocket, (struct sockaddr *)&address, sizeof(address) ) == SOCKET_ERROR ) {
+ 		Com_Printf( "WARNING: NET_IPSocket: bind: %s\n", NET_ErrorString() );
+-		close( newsocket );
++		closesocket( newsocket );
+ 		return INVALID_SOCKET;
+ 	}
+ 
+@@ -227,7 +298,10 @@ qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message ) {
+ 
+ 
+ 	if ( ret == SOCKET_ERROR ) {
+-		if ( errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNRESET ) {
++		// EAGAIN is aliased to WSAEWOULDBLOCK on Windows (see the header block);
++		// EWOULDBLOCK is not portably defined there, so key off EAGAIN only.
++		int err = socketError;
++		if ( err == EAGAIN || err == ECONNRESET ) {
+ 			return qfalse;
+ 		}
+ 		Com_Printf( "NET_GetPacket: %s\n", NET_ErrorString() );
+@@ -270,12 +344,14 @@ void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
+ 				  (struct sockaddr *)&addr, sizeof(addr) );
+ 
+ 	if ( ret == SOCKET_ERROR ) {
+-		// a full send buffer is not an error worth reporting
+-		if ( errno == EAGAIN || errno == EWOULDBLOCK ) {
++		int err = socketError;
++		// a full send buffer is not an error worth reporting (EAGAIN is aliased
++		// to WSAEWOULDBLOCK on Windows)
++		if ( err == EAGAIN ) {
+ 			return;
+ 		}
+ 		// some links refuse broadcasts
+-		if ( errno == EADDRNOTAVAIL && to->type == NA_BROADCAST ) {
++		if ( err == EADDRNOTAVAIL && to->type == NA_BROADCAST ) {
+ 			return;
+ 		}
+ 		Com_Printf( "NET_SendPacket: %s\n", NET_ErrorString() );
+@@ -303,6 +379,18 @@ static void NET_OpenIP( void ) {
+ 		return;
+ 	}
+ 
++#ifdef _WIN32
++	// Winsock must be initialised before any socket call, once per process.
++	if ( !winsockInitialized ) {
++		if ( WSAStartup( MAKEWORD( 1, 1 ), &winsockdata ) != 0 ) {
++			Com_Printf( "WARNING: Winsock initialization failed: %s\n", NET_ErrorString() );
++			return;
++		}
++		winsockInitialized = qtrue;
++		Com_DPrintf( "Winsock initialized\n" );
++	}
++#endif
++
+ 	// try a small range, as the requested port may be taken
+ 	for ( int i = 0; i < 10; i++ ) {
+ 		ip_socket = NET_IPSocket( net_ip->string, port + i );
+@@ -322,9 +410,15 @@ NET_Shutdown
+ */
+ void NET_Shutdown( void ) {
+ 	if ( ip_socket != INVALID_SOCKET ) {
+-		close( ip_socket );
++		closesocket( ip_socket );
+ 		ip_socket = INVALID_SOCKET;
+ 	}
++#ifdef _WIN32
++	if ( winsockInitialized ) {
++		WSACleanup();
++		winsockInitialized = qfalse;
++	}
++#endif
+ }
+ 
+ /*
