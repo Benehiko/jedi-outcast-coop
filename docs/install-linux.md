@@ -1,0 +1,108 @@
+# Installing on Linux
+
+This guide gets a cooperative Jedi Outcast game running on Linux x86_64.
+
+## Before you start: you need a legal copy of the game
+
+**This project does not include Jedi Outcast's game data, and never will.**
+The maps, models, textures, sounds, and music live in the retail
+`assets*.pk3` files, which are proprietary and owned by their rights holders.
+You must own a legal copy of *Star Wars Jedi Knight II: Jedi Outcast* — for
+example the [Steam release](https://store.steampowered.com/app/6030/) — so
+that those files already exist on your machine.
+
+**What this project ships**, and all it ships, is:
+
+- the *source changes* to the [OpenJK](https://github.com/JACoders/OpenJK)
+  engine that add cooperative play (the diffs in `patches/`), which build into
+  three binaries — the engine, the OpenGL renderer, and the singleplayer
+  gamecode;
+- a small original UI overlay for the in-game Co-op menu (`assets/coop-ui/`,
+  packed into `zz-coop-ui.pk3` at build time); and
+- the installer and helper scripts in `tools/`.
+
+The installer only ever **symlinks** your existing retail files into the
+place the engine looks for them. It copies nothing from your game install and
+modifies nothing there.
+
+## 1. Build the binaries
+
+Requires: `cmake`, `ninja`, `gcc`, `SDL2`, `OpenAL`, `zlib`, `libpng`,
+`libjpeg`.
+
+```sh
+# from the repository root
+tools/apply-patches.sh          # apply the co-op patches to the pinned submodule
+
+cmake -S openjk -B openjk/build -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DBuildJK2SPEngine=ON -DBuildJK2SPGame=ON -DBuildJK2SPRdVanilla=ON \
+  -DBuildSPEngine=OFF -DBuildSPGame=OFF -DBuildSPRdVanilla=OFF \
+  -DBuildMPEngine=OFF -DBuildMPRdVanilla=OFF -DBuildMPDed=OFF \
+  -DBuildMPGame=OFF -DBuildMPCGame=OFF -DBuildMPUI=OFF -DBuildMPRend2=OFF
+cmake --build openjk/build
+```
+
+This produces:
+
+| Artifact | Role |
+|---|---|
+| `openjk/build/openjo_sp.x86_64` | Engine |
+| `openjk/build/code/rd-vanilla/rdjosp-vanilla_x86_64.so` | OpenGL renderer module |
+| `openjk/build/codeJK2/game/jospgamex86_64.so` | Singleplayer gamecode |
+
+## 2. Install (recommended: one command)
+
+```sh
+tools/install-coop.sh                        # autodetect Steam GameData
+tools/install-coop.sh --gamedata /path/to/"Jedi Outcast"/GameData
+```
+
+The installer:
+
+- finds your retail **GameData** under the standard Steam libraries (parsing
+  `libraryfolders.vdf`); pass `--gamedata` if your install lives elsewhere
+  (e.g. a NAS mount). It is validated by the presence of `base/assets0.pk3`;
+- stages `~/.local/share/openjo/base/` with **symlinks** to your retail
+  `assets*.pk3`, the built co-op gamecode, and the Co-op UI overlay;
+- installs two launchers into `~/.local/bin/`.
+
+It is idempotent (safe to re-run), and `--uninstall` removes exactly what it
+created (tracked in a manifest). **Retail files are never touched.**
+
+If `~/.local/bin` is not on your `PATH`, either add it or call the launchers
+by their full path.
+
+## 3. Play
+
+```sh
+jk2coop-host                       # host a game on UDP 29070 (machine 1)
+jk2coop-join <host-ip>             # join it (machine 2)
+```
+
+To run a second client **on the same machine** for testing, use `--second`:
+it gives that client its own clean `fs_homepath` (`/tmp/jk2-client2`, wiped
+first) with its own copy of the gamecode, since the game library is loaded
+from the home path.
+
+```sh
+jk2coop-host                       # terminal 1
+jk2coop-join 127.0.0.1 --second    # terminal 2 (same box)
+```
+
+You can also host and discover games from the in-game console — see
+[Hosting and finding games from the console](../README.md#hosting-and-finding-games-from-the-console)
+in the README.
+
+## Manual install (without the script)
+
+If you would rather stage things by hand:
+
+```sh
+mkdir -p ~/.local/share/openjo/base
+ln -sfn "<steam>/Jedi Outcast/GameData/base/"assets*.pk3 ~/.local/share/openjo/base/
+ln -sfn "$PWD/openjk/build/codeJK2/game/jospgamex86_64.so" ~/.local/share/openjo/base/
+# the renderer module is loaded relative to the executable:
+ln -sfn "$PWD/openjk/build/code/rd-vanilla/rdjosp-vanilla_x86_64.so" openjk/build/
+cd openjk/build && ./openjo_sp.x86_64 +map kejim_post
+```

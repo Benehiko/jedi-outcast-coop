@@ -26,6 +26,7 @@ the Windows build/installer. The plan is in
 
 | Document | What it is |
 |---|---|
+| [install-linux.md](docs/install-linux.md) / [install-macos.md](docs/install-macos.md) / [install-windows.md](docs/install-windows.md) | **Playing? Start here.** Per-OS install guides |
 | [roadmap.md](docs/roadmap.md) | **Start here.** What happens next, in phases, with tasks |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** The plan as ordered, sitting-sized tasks with done-checks |
 | [implementation-plan.md](docs/implementation-plan.md) | Handoff-ready plan: remote-client rendering (dual-load), co-op UX, four players, Linux/Windows installer |
@@ -38,9 +39,10 @@ the Windows build/installer. The plan is in
 ## Approach
 
 The game engine is not reverse engineered. Raven Software released the
-Jedi Outcast source under the GPL in 2013; [OpenJK](https://github.com/JACoders/OpenJK)
+Jedi Outcast source under the GPLv2 in 2013; [OpenJK](https://github.com/JACoders/OpenJK)
 maintains it. Only the retail assets (`assets*.pk3`) are proprietary,
-and they are used in place, unmodified.
+and they are used in place, unmodified — this project never ships them (see
+[License](#license)).
 
 Changes to OpenJK live in `patches/` and are applied to a pinned submodule
 by `tools/apply-patches.sh`, rather than carrying a fork.
@@ -70,76 +72,49 @@ Produces three artifacts:
 | `code/rd-vanilla/rdjosp-vanilla_x86_64.so` | OpenGL renderer module |
 | `codeJK2/game/jospgamex86_64.so` | Singleplayer gamecode |
 
-## Running
+## Installing
 
-The engine reads assets and modules from `~/.local/share/openjo/base/`
-(note: `openjo`, not `openjk` — this is the Jedi Outcast target).
-Symlink the retail assets and the freshly built gamecode into place:
+### You need a legal copy of the game
 
-    mkdir -p ~/.local/share/openjo/base
-    ln -sfn "<steam>/Jedi Outcast/GameData/base/"assets*.pk3 ~/.local/share/openjo/base/
-    ln -sfn "$PWD/openjk/build/codeJK2/game/jospgamex86_64.so" ~/.local/share/openjo/base/
+**This project does not include Jedi Outcast's game data, and never will.**
+The maps, models, textures, sounds, and music are in the retail
+`assets*.pk3` files, which are proprietary and owned by their rights holders.
+You must own a legal copy of *Star Wars Jedi Knight II: Jedi Outcast* — for
+example the [Steam release](https://store.steampowered.com/app/6030/) — so
+that those files already exist on your machine.
 
-The renderer module is loaded relative to the executable:
+**What this project ships**, and all it ships, is:
 
-    ln -sfn "$PWD/openjk/build/code/rd-vanilla/rdjosp-vanilla_x86_64.so" openjk/build/
+- the *source changes* to the OpenJK engine that add cooperative play (the
+  diffs in `patches/`), which build into three binaries — the engine, the
+  OpenGL renderer, and the singleplayer gamecode;
+- a small **original** UI overlay for the in-game Co-op menu
+  (`assets/coop-ui/`, packed into `zz-coop-ui.pk3` at build time); and
+- the installer and helper scripts in `tools/`.
 
-Then:
+The Linux/macOS installers only ever **symlink** your existing retail files
+into a separate engine data directory — they copy nothing out of your game
+install and touch nothing in it. The (manual, for now) Windows path is
+**additive only**: it places the built binaries and the co-op overlay
+alongside the retail files without overwriting or modifying any of them.
 
-    cd openjk/build && ./openjo_sp.x86_64 +map kejim_post
+### Per-OS install guides
 
-### One-command co-op install (Linux)
+| OS | Guide | Status |
+|---|---|---|
+| Linux | [docs/install-linux.md](docs/install-linux.md) | one-command installer |
+| macOS | [docs/install-macos.md](docs/install-macos.md) | one-command installer (validated off-Mac; not yet run on real hardware) |
+| Windows | [docs/install-windows.md](docs/install-windows.md) | experimental — engine builds, installer not written yet |
 
-`tools/install-coop.sh` does the staging above and adds two launcher
-commands. It only creates symlinks into your existing Steam install and
-small launcher scripts — it never copies or modifies retail files.
+The short version on Linux, once you have [built the binaries](#building):
 
-    tools/install-coop.sh                        # autodetect Steam GameData
-    tools/install-coop.sh --gamedata /path/to/"Jedi Outcast"/GameData
+    tools/install-coop.sh              # symlinks your Steam assets + co-op gamecode into place
+    jk2coop-host                       # host a game on UDP 29070
+    jk2coop-join <host-ip>             # join it from another machine
 
-GameData is found under the standard Steam libraries (parsing
-`libraryfolders.vdf`); pass `--gamedata` if your install lives elsewhere
-(e.g. a NAS mount). The installer is idempotent, and `--uninstall` removes
-exactly what it created (tracked in a manifest) — retail files are never
-touched.
-
-It installs two launchers into `~/.local/bin`:
-
-    jk2coop-host [map]                 # host a co-op game on UDP 29070
-    jk2coop-join <host[:port]> [--second]
-
-`jk2coop-join`'s `--second` flag is for running a second client on the
-**same machine**: it gives that client its own clean `fs_homepath`
-(`/tmp/jk2-client2`, wiped first) with its own copy of the gamecode, since
-the game library is loaded from the home path.
-
-    jk2coop-host                       # machine/terminal 1
-    jk2coop-join 127.0.0.1 --second    # machine/terminal 2 (same box)
-
-### One-command co-op install (macOS)
-
-`tools/install-coop-macos.sh` is the macOS counterpart. It works the same
-way — symlinks the retail assets and the co-op gamecode into the engine data
-directory and drops the two launchers — with the platform differences handled
-for you:
-
-    tools/install-coop-macos.sh                  # autodetect Steam GameData
-    tools/install-coop-macos.sh --gamedata "/path/to/Jedi Outcast/GameData"
-
-- The data directory is `~/Library/Application Support/OpenJO`; the launchers
-  go in `~/bin`.
-- GameData is found under `~/Library/Application Support/Steam` (parsing
-  `libraryfolders.vdf`); pass `--gamedata` if it lives elsewhere.
-- The engine is used whether it built as an `openjo_sp.app` bundle or a plain
-  `openjo_sp.<arch>` binary (both are autodetected), and the gamecode/renderer
-  `.dylib`s carry the build architecture (`x86_64` or `arm64`). The build
-  architecture defaults to the current machine; override with `JK2_ARCH` if you
-  cross-built.
-- `--uninstall` and idempotent re-runs behave exactly as the Linux installer;
-  retail files are never touched.
-
-The launchers (`jk2coop-host`, `jk2coop-join`) and their `--second` flag work
-identically to the Linux ones described above.
+`jk2coop-join`'s `--second` flag runs a second client on the **same machine**
+for testing (its own clean `fs_homepath` + gamecode copy). See the per-OS
+guides for details, `--gamedata`/`--uninstall`, and the macOS/Windows paths.
 
 ### Hosting and finding games from the console
 
@@ -262,3 +237,26 @@ search path, rebuilding that one target is sufficient — no reinstall:
     cmake --build openjk/build --target jospgamex86_64
 
 Relaunch to pick up the change.
+
+## License
+
+The engine is [OpenJK](https://github.com/JACoders/OpenJK), which Raven
+Software released and OpenJK maintains under the **GNU General Public License,
+version 2**. This project's changes to it (`patches/`) are derivative works of
+that code and are therefore also licensed under **GPLv2**; so are the built
+binaries. The full license text is in [LICENSE](LICENSE). The original
+authorship in this repository — patches, tools, docs, and the Co-op UI overlay
+— is offered under the same terms.
+
+This project ships **no game data**. The retail `assets*.pk3` files are
+proprietary and are used in place from your own legal copy of the game; see
+[Installing](#installing).
+
+### Trademarks
+
+*Star Wars*, *Jedi Knight*, *Jedi Outcast*, and related names and marks are
+trademarks of their respective owners (Lucasfilm / Disney, and the game's
+publishers). This is an unofficial, non-commercial, fan-made project. It is
+not affiliated with, endorsed by, or sponsored by any of those rights holders.
+The GPL covers the source code only — it grants no rights in these trademarks
+or in the proprietary game assets.
