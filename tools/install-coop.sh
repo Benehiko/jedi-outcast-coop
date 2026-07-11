@@ -182,6 +182,17 @@ do_install() {
     link "$GAMECODE_SO" "$BASE_DIR/$(basename "$GAMECODE_SO")"
     info "linked gamecode $(basename "$GAMECODE_SO")"
 
+    # The co-op UI overlay (Co-op menu). Build it if it isn't built yet, then
+    # stage it. It sorts after the retail assets so its ui/menus.txt wins.
+    local coop_pk3="$ROOT/assets/coop-ui/zz-coop-ui.pk3"
+    if [[ ! -f "$coop_pk3" && -x "$ROOT/tools/build-coop-ui-pk3.sh" ]]; then
+        "$ROOT/tools/build-coop-ui-pk3.sh" >/dev/null 2>&1 || true
+    fi
+    if [[ -f "$coop_pk3" ]]; then
+        link "$coop_pk3" "$BASE_DIR/zz-coop-ui.pk3"
+        info "linked co-op UI overlay zz-coop-ui.pk3"
+    fi
+
     # The renderer is loaded relative to the engine binary; it already lives in
     # the build dir beside openjo_sp.x86_64, so the launchers run from there.
     [[ -e "$BUILD/$(basename "$RENDERER_SO")" ]] || \

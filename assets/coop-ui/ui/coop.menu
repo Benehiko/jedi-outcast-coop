@@ -1,0 +1,259 @@
+// ============================================================================
+// Co-op menu — original authorship (not derived from any retail menu file).
+// Part of the jedi-outcast-rebuild co-op mod; ships in zz-coop-ui.pk3.
+//
+// Reachable in-game via `uimenu coopMenu`. Drives the D1/D2 console commands
+// through the coopHost / coopRefresh / coopJoin / coopConnect uiScript verbs
+// and the FEEDER_COOP_SERVERS server list.
+// ============================================================================
+{
+	menuDef
+	{
+		name					"coopMenu"
+		fullScreen				1
+		rect					0 0 640 480
+		visible					1
+		focusColor				1 1 1 1
+		descAlignment			ITEM_ALIGN_CENTER
+
+		onOpen
+		{
+			// Default the max-players selector if unset, then refresh the LAN list.
+			setcvar				ui_coopMaxPlayers 2 ;
+			uiScript			coopRefresh
+		}
+
+		onESC
+		{
+			uiScript			closeingame
+		}
+
+		// --- background --------------------------------------------------
+		itemDef
+		{
+			name				background
+			style				WINDOW_STYLE_SHADER
+			rect				0 0 640 480
+			background			"gfx/menus/menu1"
+			forecolor			1 1 1 1
+			visible				1
+			decoration
+		}
+
+		// --- title -------------------------------------------------------
+		itemDef
+		{
+			name				title
+			style				WINDOW_STYLE_EMPTY
+			rect				0 30 640 30
+			text				"CO-OP"
+			font				2
+			textscale			1.4
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			320
+			forecolor			0.65 0.65 1 1
+			visible				1
+			decoration
+		}
+
+		// --- HOST section ------------------------------------------------
+		itemDef
+		{
+			name				hostLabel
+			style				WINDOW_STYLE_EMPTY
+			rect				60 90 200 20
+			text				"HOST A GAME"
+			font				3
+			textscale			0.9
+			forecolor			0.8 0.8 1 1
+			visible				1
+			decoration
+		}
+
+		// Max-players selector (2-4), bound to ui_coopMaxPlayers.
+		itemDef
+		{
+			name				maxPlayers
+			type				ITEM_TYPE_MULTI
+			style				WINDOW_STYLE_EMPTY
+			rect				60 115 240 20
+			text				"Max players:"
+			cvar				"ui_coopMaxPlayers"
+			cvarFloatList		{ "2" 2  "3" 3  "4" 4 }
+			font				3
+			textscale			0.8
+			textalign			ITEM_ALIGN_LEFT
+			forecolor			0.65 0.65 1 1
+			visible				1
+		}
+
+		itemDef
+		{
+			name				hostButton
+			type				ITEM_TYPE_BUTTON
+			style				WINDOW_STYLE_EMPTY
+			rect				60 145 120 24
+			text				"HOST"
+			font				3
+			textscale			1
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			60
+			forecolor			0.65 0.65 1 1
+			visible				1
+			action
+			{
+				play			"sound/interface/button1.wav" ;
+				uiScript		coopHost
+			}
+		}
+
+		// --- JOIN (LAN list) section -------------------------------------
+		itemDef
+		{
+			name				joinLabel
+			style				WINDOW_STYLE_EMPTY
+			rect				60 200 200 20
+			text				"JOIN A LAN GAME"
+			font				3
+			textscale			0.9
+			forecolor			0.8 0.8 1 1
+			visible				1
+			decoration
+		}
+
+		// The discovered-server list, fed by FEEDER_COOP_SERVERS.
+		itemDef
+		{
+			name				serverList
+			type				ITEM_TYPE_LISTBOX
+			style				WINDOW_STYLE_EMPTY
+			rect				60 225 400 120
+			feeder				0x18					// FEEDER_COOP_SERVERS
+			elementwidth		400
+			elementheight		16
+			elementtype			LISTBOX_TEXT
+			textscale			0.7
+			forecolor			0.8 0.8 1 1
+			border				1
+			bordercolor			0.5 0.5 0.5 1
+			visible				1
+			// Double-click a row to join it.
+			doubleClick
+			{
+				uiScript		coopJoin
+			}
+		}
+
+		itemDef
+		{
+			name				refreshButton
+			type				ITEM_TYPE_BUTTON
+			style				WINDOW_STYLE_EMPTY
+			rect				470 225 100 24
+			text				"REFRESH"
+			font				3
+			textscale			0.8
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			50
+			forecolor			0.65 0.65 1 1
+			visible				1
+			action
+			{
+				play			"sound/interface/button1.wav" ;
+				uiScript		coopRefresh
+			}
+		}
+
+		itemDef
+		{
+			name				joinButton
+			type				ITEM_TYPE_BUTTON
+			style				WINDOW_STYLE_EMPTY
+			rect				470 255 100 24
+			text				"JOIN"
+			font				3
+			textscale			0.8
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			50
+			forecolor			0.65 0.65 1 1
+			visible				1
+			action
+			{
+				play			"sound/interface/button1.wav" ;
+				uiScript		coopJoin
+			}
+		}
+
+		// --- DIRECT CONNECT section --------------------------------------
+		itemDef
+		{
+			name				directLabel
+			style				WINDOW_STYLE_EMPTY
+			rect				60 370 200 20
+			text				"DIRECT CONNECT"
+			font				3
+			textscale			0.9
+			forecolor			0.8 0.8 1 1
+			visible				1
+			decoration
+		}
+
+		// Typed ip[:port], bound to ui_coopAddress.
+		itemDef
+		{
+			name				addressField
+			type				ITEM_TYPE_EDITFIELD
+			style				WINDOW_STYLE_EMPTY
+			rect				60 395 300 20
+			text				"Address:"
+			cvar				"ui_coopAddress"
+			maxChars			48
+			font				3
+			textscale			0.8
+			textalign			ITEM_ALIGN_LEFT
+			forecolor			0.65 0.65 1 1
+			visible				1
+		}
+
+		itemDef
+		{
+			name				connectButton
+			type				ITEM_TYPE_BUTTON
+			style				WINDOW_STYLE_EMPTY
+			rect				370 393 120 24
+			text				"CONNECT"
+			font				3
+			textscale			0.8
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			60
+			forecolor			0.65 0.65 1 1
+			visible				1
+			action
+			{
+				play			"sound/interface/button1.wav" ;
+				uiScript		coopConnect
+			}
+		}
+
+		// --- BACK --------------------------------------------------------
+		itemDef
+		{
+			name				backButton
+			type				ITEM_TYPE_BUTTON
+			style				WINDOW_STYLE_EMPTY
+			rect				495 444 130 24
+			text				"BACK"
+			font				3
+			textscale			1
+			textalign			ITEM_ALIGN_CENTER
+			textalignx			65
+			forecolor			0.65 0.65 1 1
+			visible				1
+			action
+			{
+				play			"sound/interface/button1.wav" ;
+				uiScript		closeingame
+			}
+		}
+	}
+}
