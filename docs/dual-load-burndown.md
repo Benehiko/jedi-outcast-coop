@@ -103,3 +103,60 @@ as future work items below.
   matters.
 - `trace` — returns a clear trace (fraction 1). Back with `CM_*` client
   collision when local traces (effects, marks) need real hits.
+
+## Past M1 — crashes under active play (patch 0012)
+
+M1 was reached with an idle/short session. Playing the remote client
+actively — moving, aiming, shooting, with entities falling under gravity —
+surfaced two more server-state reads. Both fixed in patch 0012; a live
+two-client session then ran for minutes of active play with the remote
+client rendering its HUD, viewmodel, and the host player's model (M2 —
+weapon + HUD — confirmed on screen).
+
+### #7 — `g_gravity` null in `EvaluateTrajectory`
+
+- **Site:** `codeJK2/game/bg_misc.cpp:464` (`EvaluateTrajectory`) and
+  `:517` (`EvaluateTrajectoryDelta`), both `TR_GRAVITY`:
+  `result[2] -= ... g_gravity->value ...`.
+- **Backtrace:** `EvaluateTrajectory → CG_CalcEntityLerpPositions
+  (cg_ents.cpp:1616) → CG_AddCEntity → CG_AddPacketEntities →
+  CG_DrawActiveFrame`.
+- **Cause:** `g_gravity` is registered by `G_InitGame` (`g_main.cpp:569`),
+  server-only; it is null on the serverless remote client, whose cgame
+  still lerps `TR_GRAVITY` trajectories for packet entities (falling items,
+  bolts, corpses). The first such entity faults the client.
+- **Status:** fixed — `g_gravity ? g_gravity->value : DEFAULT_GRAVITY`.
+  The fallback equals the cvar's own default (`"800"`), so the host path is
+  unchanged. Mirrors MP's `bg_misc.c`, which uses `DEFAULT_GRAVITY` here.
+
+### #8 — `g_entities[0].client` null in the dynamic crosshair scan
+
+- **Site:** `codeJK2/cgame/cg_draw.cpp:1815` in `CG_ScanForCrosshairEntity`,
+  `VectorCopy( g_entities[0].client->renderInfo.eyePoint, start )`.
+- **Backtrace:** `CG_ScanForCrosshairEntity → ... → CG_DrawActiveFrame`.
+  Fires when the dynamic crosshair (`cg_dynamicCrosshair`) traces from the
+  local player's eye each frame.
+- **Cause:** the "100% accurate" crosshair path traces from the local
+  player's gentity — `g_entities[0].client->renderInfo` and
+  `CalcMuzzlePoint( &g_entities[0], ... )` — hardcoded to client 0 and
+  reading server state. On the remote client the local player has no
+  gentity, so `g_entities[0].client` is null.
+- **Status:** fixed — gate the accurate path on `g_entities[0].client`;
+  when null the code falls through to the existing view-origin path
+  (`cg.refdef.vieworg`/`viewaxis`), which is snapshot-derived and valid on
+  both host and remote client.
+
+## Known-open: host cannot always see networked entities
+
+Separate from the client crashes above. In a two-client session the *host*
+(client 0) intermittently does not render the second player or the campaign
+NPCs, though collision and damage against them work (server has the
+entities). They appear when in the host's PVS and vanish otherwise —
+pointing at snapshot *content*, not the render path (which is shared and
+symmetric between host and remote). Prime suspect: `sv_snapshot.cpp:428`,
+where the SP "always send" test `( ent->svFlags & SVF_BROADCAST || !e )`
+force-adds only entity 0 to every frame; other clients and NPCs must pass
+the PVS/area cull, unlike MP which force-sends clients per viewer
+(`codemp/server/sv_snapshot.cpp:443`, `e == frame->ps.clientNum`).
+Next step is a probe in `CG_AddPacketEntities` to confirm server-side
+(absent from snapshot) vs client-side (present, not drawn) before fixing.

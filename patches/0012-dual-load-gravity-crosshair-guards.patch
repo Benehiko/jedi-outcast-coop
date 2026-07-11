@@ -1,0 +1,46 @@
+diff --git a/codeJK2/game/bg_misc.cpp b/codeJK2/game/bg_misc.cpp
+index 8fd1193..313aeb3 100644
+--- a/codeJK2/game/bg_misc.cpp
++++ b/codeJK2/game/bg_misc.cpp
+@@ -461,7 +461,11 @@ void EvaluateTrajectory( const trajectory_t *tr, int atTime, vec3_t result ) {
+ 	case TR_GRAVITY:
+ 		deltaTime = ( atTime - tr->trTime ) * 0.001F;	// milliseconds to seconds
+ 		VectorMA( tr->trBase, deltaTime, tr->trDelta, result );
+-		result[2] -= 0.5F * g_gravity->value * deltaTime * deltaTime;//DEFAULT_GRAVITY
++		// dual-load: g_gravity is registered by G_InitGame (server only) and is
++		// null on a serverless remote client, whose cgame still lerps gravity
++		// trajectories for packet entities. Fall back to DEFAULT_GRAVITY, which
++		// is also the cvar's own default, so the host path is unchanged.
++		result[2] -= 0.5F * ( g_gravity ? g_gravity->value : (float)DEFAULT_GRAVITY ) * deltaTime * deltaTime;
+ 		break;
+ 	default:
+ 		Com_Error( ERR_DROP, "EvaluateTrajectory: unknown trType: %i", tr->trTime );
+@@ -514,7 +518,9 @@ void EvaluateTrajectoryDelta( const trajectory_t *tr, int atTime, vec3_t result
+ 	case TR_GRAVITY:
+ 		deltaTime = ( atTime - tr->trTime ) * 0.001F;	// milliseconds to seconds
+ 		VectorCopy( tr->trDelta, result );
+-		result[2] -= g_gravity->value * deltaTime;		// DEFAULT_GRAVITY
++		// dual-load: g_gravity is null on a serverless remote client (see the
++		// matching guard in EvaluateTrajectory above).
++		result[2] -= ( g_gravity ? g_gravity->value : (float)DEFAULT_GRAVITY ) * deltaTime;		// DEFAULT_GRAVITY
+ 		break;
+ 	default:
+ 		Com_Error( ERR_DROP, "EvaluateTrajectoryDelta: unknown trType: %i", tr->trTime );
+diff --git a/codeJK2/cgame/cg_draw.cpp b/codeJK2/cgame/cg_draw.cpp
+index d47b222..9537dd0 100644
+--- a/codeJK2/cgame/cg_draw.cpp
++++ b/codeJK2/cgame/cg_draw.cpp
+@@ -1791,7 +1791,12 @@ static void CG_ScanForCrosshairEntity( qboolean scanAll )
+ 	}
+ 	if ( !cg_forceCrosshair )
+ 	{
+-		if ( cg_dynamicCrosshair.integer )
++		// dual-load: the "100% accurate" path traces from the local player's
++		// gentity (g_entities[0].client->renderInfo, CalcMuzzlePoint) — server
++		// state that is null on a serverless remote client, whose local player
++		// has no gentity. Fall through to the view-origin path below, which is
++		// snapshot-derived and valid on both host and remote client.
++		if ( cg_dynamicCrosshair.integer && g_entities[0].client )
+ 		{//100% accurate
+ 			vec3_t d_f, d_rt, d_up;
+ 			if ( cg.snap->ps.weapon == WP_NONE ||
