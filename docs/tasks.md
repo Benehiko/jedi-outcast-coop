@@ -50,9 +50,13 @@ Legend: each task lists what it **needs** (dependencies), what to
   get world + entities but no objectives, mission text, cutscene
   handling, or verified level transitions. Plan + task breakdown:
   [campaign-ui-plan.md](campaign-ui-plan.md); tasks F1–F5 below.
-- **C4 — Windows installer**: engine builds under MSVC (CI artifact
-  `jk2coop-windows`); the installer script is not written. Needs a
-  Windows box (or a wine smoke test) to validate.
+- **C4 — Windows installer**: the engine now links under MSVC — patch
+  0005 links `wsock32` into the JK2SP engine, fixing the 13 winsock
+  `LNK2019` unresolved externals (`WSAStartup`, `socket`, `bind`,
+  `sendto`, …) that patch 0016's `net_ip.cpp` introduced but never
+  linked, so the CI `jk2coop-windows` artifact now builds. The
+  installer script (`install-coop.ps1`) is still to be written and
+  validated on a Windows box.
 - **C6 — macOS real-hardware verification**: `install-coop-macos.sh` is
   shellcheck-clean and validated against a mock build tree on Linux; it
   has not yet been run on a real Mac.

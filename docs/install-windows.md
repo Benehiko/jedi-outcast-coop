@@ -1,11 +1,13 @@
 # Installing on Windows
 
 > **Status: experimental — no installer yet.** The Windows *engine* builds
-> (the winsock port, patch 0016, lets the co-op UDP transport compile under
-> MSVC, and CI produces `openjo_sp.exe`), but the one-command installer for
-> Windows is not written yet — it is tracked as task **C4** in
-> [tasks.md](tasks.md). For now, Windows setup is manual. Contributions
-> welcome.
+> under MSVC: the winsock port (patch 0016) makes the co-op UDP transport
+> compile, and patch 0005 links `wsock32` into the JK2SP engine so it also
+> *links* (without that library the build failed with winsock `LNK2019`
+> unresolved externals). CI now produces `openjo_sp.exe` and the gamecode
+> and renderer DLLs. The one-command installer for Windows is not written
+> yet — it is tracked as task **C4** in [tasks.md](tasks.md). For now,
+> Windows setup is manual. Contributions welcome.
 
 ## Before you start: you need a legal copy of the game
 
