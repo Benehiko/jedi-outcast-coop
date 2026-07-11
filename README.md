@@ -110,6 +110,22 @@ the game library is loaded from the home path.
     jk2coop-host                       # machine/terminal 1
     jk2coop-join 127.0.0.1 --second    # machine/terminal 2 (same box)
 
+### Hosting and finding games from the console
+
+You can also host from a game that is already running, with no launch flags:
+
+    coop_host [maxplayers]      # open the network socket for the current game
+                               # prints the port a second machine should join
+
+And a joiner can discover co-op hosts on the local network instead of typing an
+IP:
+
+    localservers                # broadcasts on the LAN; prints each co-op host
+                               # found, with its name, map, and player count
+
+`sv_hostname` sets the name shown in that list (it defaults to your player
+name). Both commands are the plumbing the in-game Co-op menu will drive.
+
 ## Cooperative campaign
 
 **Route reversed.** See [docs/route-comparison.md](docs/route-comparison.md).
