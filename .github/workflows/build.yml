@@ -1,0 +1,113 @@
+name: build
+
+# Build the JK2 co-op engine, gamecode, and renderer from the pinned OpenJK
+# submodule with this repo's patches applied. Linux is the supported target and
+# must stay green; the Windows leg is allowed to fail while it is brought up
+# (the winsock transport port, patch 0016, is the prerequisite that makes it
+# possible — see docs/implementation-plan.md § C2/C3).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            experimental: false
+          - name: windows
+            os: windows-latest
+            experimental: true   # allowed to fail until the Windows build is validated
+    continue-on-error: ${{ matrix.experimental }}
+
+    steps:
+      - name: Checkout (with OpenJK submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # ---- Linux -----------------------------------------------------------
+      - name: Install Linux build dependencies
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential \
+            libsdl2-dev libopenal-dev zlib1g-dev libpng-dev libjpeg-dev
+
+      - name: Apply patches (Linux)
+        if: matrix.name == 'linux'
+        run: tools/apply-patches.sh
+
+      - name: Configure (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          cmake -S openjk -B openjk/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBuildJK2SPEngine=ON -DBuildJK2SPGame=ON -DBuildJK2SPRdVanilla=ON \
+            -DBuildSPEngine=OFF -DBuildSPGame=OFF -DBuildSPRdVanilla=OFF \
+            -DBuildMPEngine=OFF -DBuildMPRdVanilla=OFF -DBuildMPDed=OFF \
+            -DBuildMPGame=OFF -DBuildMPCGame=OFF -DBuildMPUI=OFF -DBuildMPRend2=OFF
+
+      - name: Build (Linux)
+        if: matrix.name == 'linux'
+        run: cmake --build openjk/build
+
+      - name: Collect Linux artifacts
+        if: matrix.name == 'linux'
+        run: |
+          mkdir -p dist
+          cp openjk/build/openjo_sp.x86_64                              dist/
+          cp openjk/build/codeJK2/game/jospgamex86_64.so               dist/
+          cp openjk/build/code/rd-vanilla/rdjosp-vanilla_x86_64.so     dist/
+          ls -l dist
+
+      - name: Upload Linux artifacts
+        if: matrix.name == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jk2coop-linux
+          path: dist/*
+          if-no-files-found: error
+
+      # ---- Windows (experimental) -----------------------------------------
+      # OpenJK builds under MSVC; the patches apply the same way (tools are the
+      # Git-for-Windows bash + patch that the runner ships). The winsock port
+      # (patch 0016) is what lets code/qcommon/net_ip.cpp compile here.
+      - name: Apply patches (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: tools/apply-patches.sh
+
+      - name: Configure (Windows)
+        if: matrix.name == 'windows'
+        run: >
+          cmake -S openjk -B openjk/build
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBuildJK2SPEngine=ON -DBuildJK2SPGame=ON -DBuildJK2SPRdVanilla=ON
+          -DBuildSPEngine=OFF -DBuildSPGame=OFF -DBuildSPRdVanilla=OFF
+          -DBuildMPEngine=OFF -DBuildMPRdVanilla=OFF -DBuildMPDed=OFF
+          -DBuildMPGame=OFF -DBuildMPCGame=OFF -DBuildMPUI=OFF -DBuildMPRend2=OFF
+
+      - name: Build (Windows)
+        if: matrix.name == 'windows'
+        run: cmake --build openjk/build --config RelWithDebInfo
+
+      - name: Upload Windows artifacts
+        if: matrix.name == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jk2coop-windows
+          path: |
+            openjk/build/**/openjo_sp.exe
+            openjk/build/**/jospgamex86_64.dll
+            openjk/build/**/rdjosp-vanilla_x86_64.dll
+          if-no-files-found: warn
