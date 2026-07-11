@@ -1,11 +1,14 @@
 # Installing on Windows
 
-> **Status: experimental — no installer yet.** The Windows *engine* builds
-> (the winsock port, patch 0016, lets the co-op UDP transport compile under
-> MSVC, and CI produces `openjo_sp.exe`), but the one-command installer for
-> Windows is not written yet — it is tracked as task **C4** in
-> [tasks.md](tasks.md). For now, Windows setup is manual. Contributions
-> welcome.
+> **Status: experimental.** The Windows *engine* builds under MSVC: the
+> winsock port (patch 0016) makes the co-op UDP transport compile, and patch
+> 0005 links `wsock32` into the JK2SP engine so it also *links* (without that
+> library the build failed with winsock `LNK2019` unresolved externals). CI
+> now produces `openjo_sp.x86_64.exe` and the gamecode and renderer DLLs.
+> A PowerShell installer, `tools/install-coop.ps1`, is provided (see § 2);
+> its logic is verified but it has not yet been run against a real retail
+> install on live Windows hardware — that final check is task **C4** in
+> [tasks.md](tasks.md). Contributions welcome.
 
 ## Before you start: you need a legal copy of the game
 
@@ -41,44 +44,82 @@ Either download the `jk2coop-windows` artifact from a green
   with the same `-DBuildJK2SP*` options shown in the
   [Linux guide](install-linux.md#1-build-the-binaries).
 
-This produces `openjo_sp.exe`, the renderer DLL, and the gamecode DLL
-(`jospgamex86.dll` / `jospgamex86_64.dll` depending on the target).
+The CI `jk2coop-windows` artifact (and a local build) produces three files:
+the engine `openjo_sp.x86_64.exe`, the renderer `rdjosp-vanilla_x86_64.dll`,
+and the gamecode `jospgamex86_64.dll`.
 
-## 2. Install (manual, for now)
+## 2. Install with the PowerShell installer
 
-Additive only — copy the built files alongside your retail install; never
-modify or overwrite retail files.
+`tools/install-coop.ps1` performs an additive install — it never copies,
+overwrites, or modifies any retail file. It stages the co-op engine,
+renderer, gamecode DLL, and the Co-op UI overlay into a separate directory
+(by default `%LOCALAPPDATA%\jk2coop`) and writes two launcher scripts beside
+it. At runtime the engine loads your retail assets read-only from your
+`GameData` directory via `fs_cdpath`, while the co-op files load from the
+staging directory via `fs_basepath`.
 
-1. Locate your retail `GameData` directory (the one containing
-   `base\assets0.pk3`).
-2. Copy the built **gamecode DLL** and the **Co-op UI overlay**
-   (`zz-coop-ui.pk3`, built from `assets/coop-ui/`) into `GameData\base\`.
-3. Keep `openjo_sp.exe` and the renderer DLL together in their own folder;
-   point the engine at your retail assets with
-   `+set fs_basepath "<path to>\Jedi Outcast\GameData"`.
+From a PowerShell prompt in the repository root:
+
+```powershell
+# Drop the three built binaries somewhere (e.g. the extracted jk2coop-windows
+# artifact), then:
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 `
+  -Binaries <folder with the 3 files>
+```
+
+The installer locates your Jedi Outcast `GameData` automatically via the
+Steam registry key (`HKCU:\Software\Valve\Steam`) and
+`libraryfolders.vdf`. If your install lives somewhere non-standard (for
+example a different drive or a network path), point at it explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 `
+  -Binaries .\artifact\RelWithDebInfo `
+  -GameData "D:\Games\Jedi Outcast\GameData"
+```
+
+Re-running is idempotent. To remove exactly what the installer created
+(leaving your retail install untouched):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -Uninstall
+```
 
 ## 3. Play
 
-Host:
+The installer writes `jk2coop-host.cmd` and `jk2coop-join.cmd` next to the
+staging directory. Host a game:
 
 ```bat
-openjo_sp.exe +set fs_basepath "<...>\Jedi Outcast\GameData" ^
-  +set net_enabled 1 +set net_port 29070 +map kejim_post
+jk2coop-host.cmd            :: host kejim_post on port 29070
+jk2coop-host.cmd ns_streets :: host a specific map
 ```
 
 Join, from another machine:
 
 ```bat
-openjo_sp.exe +set fs_basepath "<...>\Jedi Outcast\GameData" ^
+jk2coop-join.cmd <host-ip>
+```
+
+Prefer to run the engine directly? The equivalent invocations are:
+
+```bat
+openjo_sp.x86_64.exe +set fs_basepath "<staging dir>" ^
+  +set fs_cdpath "<...>\Jedi Outcast\GameData" ^
+  +set net_enabled 1 +set net_port 29070 +map kejim_post
+
+openjo_sp.x86_64.exe +set fs_basepath "<staging dir>" ^
+  +set fs_cdpath "<...>\Jedi Outcast\GameData" ^
   +set net_enabled 1 +connect <host-ip>
 ```
 
 You can also host and discover games from the in-game console — see
 the co-op guide: [coop-guide.md](coop-guide.md).
 
-## Help wanted
+## Status
 
-A proper `tools/install-coop.ps1` (GameData autodetection via the Steam
-registry key + `libraryfolders.vdf`, additive copy into `GameData\base`,
-host/join `.cmd` launchers, `-Uninstall`) is the missing piece — see task C4
-in [tasks.md](tasks.md).
+The installer's logic (GameData autodetection, additive staging,
+idempotent re-runs, and manifest-tracked `-Uninstall`) has been exercised
+end-to-end on a mock tree. Running it against a real retail install on a
+live Windows machine, and confirming the engine hosts/joins there, is the
+last verification step for task C4 in [tasks.md](tasks.md).
