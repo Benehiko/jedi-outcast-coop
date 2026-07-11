@@ -29,14 +29,21 @@ Landed, verified headlessly (Xvfb + `screenshot_png` + gdb; see
 - **Track C**: C1 (Linux installer, `tools/install-coop.sh`), C2 (CI,
   `.github/workflows/build.yml`), C3 (winsock, patch **0016**) all done. Patch
   0007 was regenerated so `apply-patches.sh` runs clean from a fresh checkout.
-- **Track D**: D1 (`coop_host`, patch **0017**) and D2 (`localservers` LAN
-  discovery, patch **0018**) done.
+- **Track D**: D1 (`coop_host`, patch **0017**), D2 (`localservers` LAN
+  discovery, patch **0018**), and D3 (co-op menu, engine patch **0019** + the
+  `zz-coop-ui.pk3` overlay in `assets/coop-ui/`) all done — the menu, its
+  server-list feeder, and the discovered-host listing were verified headlessly
+  by opening `uimenu coopMenu` under Xvfb and screenshotting it.
 
 Actual patch numbers diverged from the parentheticals below (C3 is 0016 not
-0015; A6 needed no patch). Remaining work needs things headless CI can't do:
-**D3** (co-op menu — needs an authored `.menu` asset + a rendered/mouse test),
-**M4 active-combat** and **C4** (a human-driven windowed session / a Windows
-box), and **Track E** (gated on a fully-playable 2-player M4).
+0015; A6 needed no patch; D1/D2/D3 are 0017/0018/0019). The headless harness
+CAN render + screenshot menus (`uimenu coopMenu` under Xvfb), so menu work is
+verifiable. Remaining work still needs a human or a Windows box: **M4
+active-combat** (both players fighting 10 min — needs client input injection),
+**C4** (Windows installer — needs a Windows box + green C2 Windows leg), and
+**Track E** (four players — gated on a fully-playable 2-player M4). The only
+D3 piece not machine-verified is mouse-clicking the buttons; the verb code
+paths and the menu/feeder rendering are confirmed.
 
 ---
 
