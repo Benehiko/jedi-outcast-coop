@@ -357,6 +357,30 @@ players fully playable). E1+E2+E3 shipped together as patch **0020**
   clause, which `SV_PacketEvent` never needed either). This is the
   project's headline milestone.
 
+- [x] **E4 — four-player LIVE session + slot-lifecycle fixes.** (patch 0021)
+  Human-verified 2026-07-11: the developer hosted `kejim_post` in a real
+  window on the desktop (campaign intro cinematic, objectives, and
+  scripted NPCs all run for the host player) while three driven bot
+  clients joined from a hidden Xvfb — four players in one live game,
+  confirmed working by the player. Two bugs surfaced and fixed en route:
+  1. **`SV_CheckTimeouts` only ever examined `svs.clients[0]`** (stock
+     SP assumed one client), so a disconnected joiner's slot stayed
+     `CS_ZOMBIE` forever — the server read "full" minutes after a
+     leaver, and unresponsive joiners were never timed out. Fixed to
+     loop every slot, matching codemp. Verified headless (fill 4/4 →
+     one leaves → new joiner takes the freed slot) and live (the bot
+     crew was swapped mid-session; all three replacement joiners
+     entered the vacated slots).
+  2. **A connect rejection left the joiner on a silent loading screen**:
+     the client printed the server's OOB `print` ("Server is full.") to
+     the console but kept resending connect requests forever. Now a
+     `print` from the dialled server while still connecting is treated
+     as a rejection — the client stops retrying and drops to the menu
+     showing the server's message.
+  Known limitation (next co-op tier, not a bug): campaign UI — cutscenes,
+  objectives, mission text — renders only for the host player; joiners
+  see world + entities. Playing the campaign co-op means the human hosts.
+
 ---
 
 ## Suggested schedule
