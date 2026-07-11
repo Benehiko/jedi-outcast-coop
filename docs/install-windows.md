@@ -74,8 +74,7 @@ openjo_sp.exe +set fs_basepath "<...>\Jedi Outcast\GameData" ^
 ```
 
 You can also host and discover games from the in-game console — see
-[Hosting and finding games from the console](../README.md#hosting-and-finding-games-from-the-console)
-in the README.
+the co-op guide: [coop-guide.md](coop-guide.md).
 
 ## Help wanted
 

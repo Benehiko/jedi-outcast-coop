@@ -3,7 +3,8 @@
 The [implementation plan](implementation-plan.md) sliced into tasks sized
 for one sitting each. Work top to bottom within a track; tracks A, C and D
 are independent of each other and can be worked in parallel or interleaved.
-Track E goes last.
+Track E went last of the original plan; Track F (campaign UI for joiners,
+[campaign-ui-plan.md](campaign-ui-plan.md)) is the current frontier.
 
 Every task ends the same way: **run the loopback regression** (`cd
 openjk/build && ./openjo_sp.x86_64 +map kejim_post` → exit 0, no errors,
@@ -19,35 +20,51 @@ Legend: each task lists what it **needs** (dependencies), what to
 
 ## Status (2026-07-11)
 
-Landed, verified headlessly (Xvfb + `screenshot_png` + gdb; see
-`tools/headless-verify.sh`, `tools/soak-m4.sh`):
+### Completed
 
-- **Track A**: A1–A5 done; **M3** (host players + NPCs render) = patch 0014,
-  plus character velocity/lean = 0015; **M4 render-stability** confirmed by a
-  10-minute soak. A6 audited — the `entityStateFields` assert already holds in
-  the Debug build, no change needed.
-- **Track C**: C1 (Linux installer, `tools/install-coop.sh`), C2 (CI,
-  `.github/workflows/build.yml`), C3 (winsock, patch **0016**), and C5 (macOS
-  installer, `tools/install-coop-macos.sh`) all done. Patch 0007 was regenerated
-  so `apply-patches.sh` runs clean from a fresh checkout.
-- **Track D**: D1 (`coop_host`, patch **0017**), D2 (`localservers` LAN
-  discovery, patch **0018**), and D3 (co-op menu, engine patch **0019** + the
-  `zz-coop-ui.pk3` overlay in `assets/coop-ui/`) all done — the menu, its
-  server-list feeder, and the discovered-host listing were verified headlessly
-  by opening `uimenu coopMenu` under Xvfb and screenshotting it.
+- **Track A** (remote client renders): A1–A6 done. M3 (host players +
+  NPCs render on the joiner) = patch **0014**, character velocity/lean =
+  **0015**; M4 render-stability confirmed by a 10-minute headless soak.
+- **Track C** (distribution): C1 Linux installer, C2 CI
+  (`.github/workflows/build.yml`), C3 winsock (patch **0016**), C5 macOS
+  installer (`tools/install-coop-macos.sh`, logic validated off-Mac).
+  Patch 0007 regenerated so `apply-patches.sh` runs clean.
+- **Track D** (co-op UX): D1 `coop_host` (**0017**), D2 `localservers`
+  LAN discovery (**0018**), D3 in-game Co-op menu (**0019** +
+  `zz-coop-ui.pk3`). Verified headless via `uimenu coopMenu` + screenshot.
+- **Track E** (four players): E1 `sv_maxclients` + E2 cap raise +
+  protocol bump + E3 headless four-player verification (**0020**, incl.
+  the loopback qport-collision root cause), and **E4 — the first
+  human-verified LIVE session**: the developer hosted the kejim_post
+  campaign in a real window with three bot joiners, four players in one
+  game ("and it works"). Patch **0021** fixed the two bugs that session
+  surfaced: disconnected joiner slots never left CS_ZOMBIE
+  (`SV_CheckTimeouts` only examined slot 0), and rejected connects sat on
+  a silent loading screen instead of showing the server's message.
+- GPLv2 `LICENSE` at root, per-OS install guides
+  (`docs/install-*.md`), and README license/trademark sections.
 
-Actual patch numbers diverged from the parentheticals below (C3 is 0016 not
-0015; A6 needed no patch; D1/D2/D3 are 0017/0018/0019). The headless harness
-CAN render + screenshot menus (`uimenu coopMenu` under Xvfb), so menu work is
-verifiable. **Track E** (four players) is now done — patch **0020** raises the
-cap to four and fixes the loopback qport collision that kept extra same-IP
-joiners out; a host + three joiners were verified headless. Remaining work still
-needs a human or another OS: **M4 active-combat** (both players fighting 10 min
-— needs client input injection), **C4** (Windows installer — needs a Windows box
-+ green C2 Windows leg), and **C5** on a real Mac (logic validated on Linux
-against a mock build tree). The only
-D3 piece not machine-verified is mouse-clicking the buttons; the verb code
-paths and the menu/feeder rendering are confirmed.
+### Outstanding
+
+- **Track F — campaign UI for joiners** (planned, not started): joiners
+  get world + entities but no objectives, mission text, cutscene
+  handling, or verified level transitions. Plan + task breakdown:
+  [campaign-ui-plan.md](campaign-ui-plan.md); tasks F1–F5 below.
+- **C4 — Windows installer**: engine builds under MSVC (CI artifact
+  `jk2coop-windows`); the installer script is not written. Needs a
+  Windows box (or a wine smoke test) to validate.
+- **C6 — macOS real-hardware verification**: `install-coop-macos.sh` is
+  shellcheck-clean and validated against a mock build tree on Linux; it
+  has not yet been run on a real Mac.
+- **Extended live combat soak**: E3's "10-minute four-player firefight"
+  in a live window — the E4 session verified live multi-player campaign
+  play but was not a timed combat soak.
+
+Patch numbers in task parentheticals below diverged from what landed
+(C3 is 0016 not 0015; A6 needed no patch; D1/D2/D3 are 0017/0018/0019;
+E1–E3 are 0020; E4 fixes are 0021). The only D3 piece not
+machine-verified is mouse-clicking the buttons; the verb code paths and
+the menu/feeder rendering are confirmed.
 
 ---
 
@@ -233,8 +250,21 @@ modify the retail install (add files only).
   mock macOS build tree (both `.app` and plain-binary forms, autodetect,
   idempotent re-run with no manifest dupes, uninstall that removes only
   what it created and preserves a pre-existing `~/bin` file, retail
-  GameData left intact). Not yet exercised on a real Mac — that's the
-  one remaining check, like C4 needs a real Windows box.
+  GameData left intact). Real-Mac run is C6.
+
+- [ ] **C6 — macOS real-hardware verification.** (no patch)
+  Needs: C5, a Mac (Intel or Apple Silicon) with Steam JK2.
+  Do: build the JK2SP targets on the Mac (note whether
+  `MakeApplicationBundles` produced an `.app` or a plain binary), run
+  `tools/install-coop-macos.sh`, then `jk2coop-host` and
+  `jk2coop-join 127.0.0.1 --second`. Exercise `--uninstall` and a re-run.
+  File fixes for anything that only reproduces on real hardware
+  (Gatekeeper/quarantine on the dylibs is the likely suspect — note
+  whether `xattr -d com.apple.quarantine` or codesigning is needed, and
+  fold the answer into docs/install-macos.md).
+  Done: two-client co-op session on a real Mac; install → play →
+  uninstall leaves no trace; install-macos.md updated with any
+  hardware-only caveats.
 
 ---
 
@@ -380,6 +410,66 @@ players fully playable). E1+E2+E3 shipped together as patch **0020**
   Known limitation (next co-op tier, not a bug): campaign UI — cutscenes,
   objectives, mission text — renders only for the host player; joiners
   see world + entities. Playing the campaign co-op means the human hosts.
+  That limitation is Track F.
+
+---
+
+## Track F — campaign UI for joiners
+
+Background: [campaign-ui-plan.md](campaign-ui-plan.md) — read it first;
+it holds the problem statement (SP gamecode calls the cgame in-process,
+"jump the network" is a literal Raven comment), the design principles
+(host player is canon; configstrings for state, server commands for
+events; joiners spectate cutscenes), and the code pointers. One patch per
+task. Every task keeps the solo loopback regression green.
+
+- [ ] **F1 — objective sync.**
+  Needs: nothing.
+  Do: configstring range for `mission_objectives` (packed
+  text/status/display per slot), written when the ICARUS objective verbs
+  fire; joiner cgame mirrors it and the datapad reader
+  (`cg_info.cpp:224`) uses the mirror when `cg_remoteClient`, the direct
+  `gent` read otherwise. Bump `PROTOCOL_VERSION`.
+  Done: joiner's datapad matches the host's, including one objective
+  completed mid-session; late joiner gets the current set; solo datapad
+  unchanged.
+
+- [ ] **F2 — mission text + centerprint sync.**
+  Needs: F1.
+  Do: replace the gamecode's direct `CG_CenterPrint` calls
+  (`g_target.cpp:1056` et al) with a helper that prints on the host and
+  broadcasts `cp "<key>"` to all clients; handle `cp` in the joiner
+  cgame's server-command dispatcher.
+  Done: host hits kejim_post's checkpoint trigger → every joiner shows
+  the same centerprint; solo unchanged.
+
+- [ ] **F3 — cutscene handling (spectate/freeze MVP).**
+  Needs: F2.
+  Do: broadcast `cutscene 1|0` when the host enters/leaves an ICARUS
+  camera (`g_camera.cpp`); joiners letterbox + suppress their input for
+  the duration. Briefing videos stay host-only (joiners get a "briefing
+  in progress" card).
+  Done: kejim_post intro cutscene freezes + letterboxes joiners, releases
+  cleanly; no joiner can roam mid-cutscene.
+
+- [ ] **F4 — level transition follow.**
+  Needs: F1 landed (investigate any time).
+  Do: establish what happens to joiners when the host completes a level
+  (`target_level_change` → `SV_SpawnServer`); make the standard
+  new-gamestate → reload → re-enter flow work, and re-run the patch-0008
+  spawn ring on the new map.
+  Done: host finishes kejim_post; every joiner loads the next map and
+  spawns clear without manual reconnect.
+
+- [ ] **F5 — verification: harness + live session.**
+  Needs: F1–F4.
+  Do: extend the headless harness — scripted host walks kejim_post's
+  opening to the checkpoint + first objective; assert the joiner log
+  shows the `cp` broadcast, the objective configstring, and the F4
+  map-change reload. Then a live session: human hosts a full level with
+  3 bots.
+  Done: harness green; a joiner window shows objectives + mission text
+  through a full level, live.
 
 ---
 
@@ -396,3 +486,13 @@ players fully playable). E1+E2+E3 shipped together as patch **0020**
 | 7 | D3 | Best after A-M2, when a joiner can see what they joined |
 | 8 | E1 → E2 → E3 | Gated on A-M4 by design |
 | 9 | C4 | Last: needs C2+C3 artifacts and a Windows test machine |
+
+Everything above is done except C4. What remains, in suggested order:
+
+| Order | Task | Why then |
+|---|---|---|
+| 1 | F1 → F2 | Establishes the state/event routing pattern; F2 is small once F1 exists |
+| 2 | F4 investigation | Biggest unknown in Track F — scout it before committing to F3's shape |
+| 3 | F3 | Depends on F2's event channel |
+| 4 | F4 fix → F5 | Transition fix lands on the routing pattern; F5 seals the track |
+| 5 | C4, C6 | Hardware-gated (Windows box, real Mac) — do whenever the hardware appears |
