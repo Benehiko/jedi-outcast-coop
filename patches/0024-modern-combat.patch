@@ -101,6 +101,15 @@
  	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
  	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
  
+@@ -361,7 +363,7 @@
+ 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
+ 	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "1", CVAR_ARCHIVE  },
+ 	{ &cg_drawCrosshair, "cg_drawCrosshair", "1", CVAR_ARCHIVE },
+-	{ &cg_dynamicCrosshair, "cg_dynamicCrosshair", "1", CVAR_ARCHIVE },
++	{ &cg_dynamicCrosshair, "cg_dynamicCrosshair", "0", CVAR_ARCHIVE },	// 0 = fixed screen-center crosshair (modern, no drift). 1 = legacy dynamic crosshair traced from the moving weapon muzzle along smoothed lerp-angles, which visibly lags/drifts behind the view.
+ 	{ &cg_crosshairIdentifyTarget, "cg_crosshairIdentifyTarget", "1", CVAR_ARCHIVE },
+ 	{ &cg_crosshairForceHint, "cg_crosshairForceHint", "1", CVAR_ARCHIVE|CVAR_SAVEGAME|CVAR_NORESTART },
+ 	{ &cg_missionstatusscreen, "cg_missionstatusscreen", "0", CVAR_ROM},
 --- a/codeJK2/cgame/cg_local.h
 +++ b/codeJK2/cgame/cg_local.h
 @@ -591,6 +591,7 @@

@@ -14,7 +14,12 @@ day. Three of its combat defaults read as dated on modern high-DPI, high
    auto-aimed — snapping your facing and swing direction onto the closest
    enemy when you stood still or ran straight at them. Modern players
    expect free aim.
-3. **Blaster bolts were slow.** Primary-fire projectile velocities were
+3. **The crosshair drifted and lagged behind the view.** The default
+   "dynamic" crosshair was traced from the moving weapon muzzle along
+   smoothed interpolated angles, so it sat off-center and visibly trailed
+   the view when you turned — worse once aim was made snappier. Modern
+   shooters use a fixed screen-center crosshair.
+4. **Blaster bolts were slow.** Primary-fire projectile velocities were
    low enough that bolts read as lobbed "slugs" you could stroll around,
    rather than the snappy near-hitscan of a modern shooter.
 
@@ -57,7 +62,29 @@ persists.
 Guns never had auto-aim in the first place — player blaster/pistol fire
 has always used your raw view angles — so this only affects the saber.
 
-### 3. Faster projectiles
+### 3. Fixed screen-center crosshair
+
+`cg_dynamicCrosshair` now defaults to `0` (was `1`).
+
+The legacy dynamic crosshair (`1`) was traced from the moving weapon
+muzzle along the *interpolated* view angles (`lerpAngles`) rather than
+from screen center. That put the crosshair off-center at the barrel and
+made it visibly drift and lag behind the view as you turned — the effect
+gets more noticeable once aim is snappier (see change 1). The fixed
+crosshair (`0`) sits at screen center and tracks your view exactly, the
+way modern shooters do.
+
+| Cvar | Default | Meaning |
+|---|---|---|
+| `cg_dynamicCrosshair` | `0` | `0` = fixed screen-center crosshair (modern, no drift). `1` = legacy dynamic crosshair traced from the moving weapon muzzle, which lags/drifts behind the view. |
+
+Note: the legacy dynamic crosshair was "100% accurate" in the sense that
+it showed the muzzle's exact line including barrel parallax. With the
+fixed crosshair, at very close range a bolt fired from the offset muzzle
+can land slightly off dead-center; at normal engagement distances the two
+converge.
+
+### 4. Faster projectiles
 
 Primary blaster-type projectile velocities were roughly doubled for a
 snappy, near-hitscan feel. Values are `#define`s in
@@ -93,6 +120,7 @@ Everything is a cvar or a build-time constant:
 ```
 seta g_saberAutoAim 1          // classic saber auto-aim
 seta cg_fovSensitivityScale 1  // classic FOV-linked sensitivity
+seta cg_dynamicCrosshair 1     // classic muzzle-traced dynamic crosshair
 ```
 
 Projectile speeds are compile-time; to restore them, edit the velocities
@@ -107,5 +135,5 @@ The change builds into the single-player module `jospgamex86_64.so`
 
 ```
 ninja -C openjk/build jospgamex86_64
-strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale'
+strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale|cg_dynamicCrosshair'
 ```
