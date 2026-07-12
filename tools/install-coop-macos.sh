@@ -39,6 +39,12 @@
 #   --with-widescreen Enable the widescreen/QHD/ultrawide video-menu mod.
 #   --with-textures   Generate the AI material-texture pak (GPU + container).
 #   --with-upscale    Build the Real-ESRGAN hi-res texture pak (GPU + container).
+#   --combat MODE     Combat feel: 'modern' (default; free aim, fixed crosshair,
+#                     FOV-independent sensitivity, faster bolts) or 'classic'
+#                     (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity).
+#                     Written to base/autoexec_sp.cfg so it overrides stale configs.
+#   --skip-cutscenes  Auto-skip scripted map-intro cutscenes (off by default).
+#   --no-skip-cutscenes  Never auto-skip cutscenes (suppress the prompt).
 #   --all             Enable every optional mod above.
 #   --no-optional     Skip all optional-mod prompts (core install only).
 #   --yes, -y         Assume "yes" to prompts that would otherwise be shown.
@@ -122,6 +128,12 @@ OPT_WIDESCREEN=ask
 OPT_TEXTURES=ask
 OPT_UPSCALE=ask
 ASSUME_YES=0
+
+# Combat feel (see install-coop.sh for the rationale). The gamecode ships modern
+# defaults; this writes them explicitly to autoexec_sp.cfg so a stale config on
+# disk can't override them, and lets the user pick the classic feel instead.
+COMBAT_MODE=modern
+OPT_SKIPCUTSCENES=ask
 
 is_interactive() { [[ -t 0 ]]; }
 
@@ -236,6 +248,40 @@ do_uninstall() {
 # Runs after the core install. For each mod, resolves the opt-in decision, and
 # if yes either builds+links the pak or (for GPU mods, always on macOS) prints
 # the exact command to run later. All installed paks are manifest-tracked.
+# Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
+# cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
+# openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
+write_combat_config() {
+    local cfg="$BASE_DIR/autoexec_sp.cfg"
+    local skip aim xhair sens desc
+
+    if [[ "$COMBAT_MODE" == classic ]]; then
+        aim=1; xhair=1; sens=1
+        desc="classic (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity)"
+    else
+        aim=0; xhair=0; sens=0
+        desc="modern (free aim, fixed crosshair, FOV-independent sensitivity)"
+    fi
+
+    if [[ "$(resolve_opt "$OPT_SKIPCUTSCENES" \
+        "Auto-skip scripted map-intro cutscenes?")" == yes ]]; then
+        skip=1
+    else
+        skip=0
+    fi
+
+    {
+        echo "// Written by install-coop-macos.sh — modern combat feel."
+        echo "// Delete this file (or re-run with --combat classic) to change it."
+        echo "seta g_saberAutoAim \"$aim\""
+        echo "seta cg_dynamicCrosshair \"$xhair\""
+        echo "seta cg_fovSensitivityScale \"$sens\""
+        echo "seta g_skipIntroCinematics \"$skip\""
+    } > "$cfg"
+    manifest_add "$cfg"
+    info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+}
+
 do_optional_mods() {
     local gamedata="$1"
     local any=0
@@ -300,6 +346,10 @@ do_optional_mods() {
             info "    tools/upscale-textures.sh --assets '$gamedata/base' --out '$up_pak'"
         fi
     fi
+
+    # --- Modern combat feel + optional cutscene skip -----------------------
+    write_combat_config
+    any=1
 
     (( any == 0 )) && info "no optional mods selected."
     return 0
@@ -431,16 +481,25 @@ while [[ $# -gt 0 ]]; do
         --with-widescreen) OPT_WIDESCREEN=yes; shift ;;
         --with-textures)   OPT_TEXTURES=yes; shift ;;
         --with-upscale)    OPT_UPSCALE=yes; shift ;;
+        --combat) COMBAT_MODE="${2:?--combat needs modern|classic}"; shift 2 ;;
+        --combat=*) COMBAT_MODE="${1#*=}"; shift ;;
+        --skip-cutscenes)    OPT_SKIPCUTSCENES=yes; shift ;;
+        --no-skip-cutscenes) OPT_SKIPCUTSCENES=no; shift ;;
         --all)             OPT_WIDESCREEN=yes; OPT_TEXTURES=yes; OPT_UPSCALE=yes; shift ;;
-        --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; shift ;;
+        --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; OPT_SKIPCUTSCENES=no; shift ;;
         --yes|-y)          ASSUME_YES=1; shift ;;
         --uninstall) ACTION=uninstall; shift ;;
         -h|--help)
-            sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
 done
+
+case "$COMBAT_MODE" in
+    modern|classic) ;;
+    *) die "--combat must be 'modern' or 'classic' (got: $COMBAT_MODE)" ;;
+esac
 
 case "$ACTION" in
     install)   do_install "$GAMEDATA" ;;

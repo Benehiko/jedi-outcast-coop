@@ -56,7 +56,23 @@
  #define	DEMP2_NPC_DAMAGE_HARD		18
 --- a/codeJK2/game/g_main.cpp
 +++ b/codeJK2/game/g_main.cpp
-@@ -587,7 +587,7 @@
+@@ -160,6 +160,7 @@
+ cvar_t	*g_ICARUSDebug;
+ cvar_t	*com_buildScript;
+ cvar_t	*g_skippingcin;
++cvar_t	*g_skipIntroCinematics;
+ cvar_t	*g_AIsurrender;
+ cvar_t	*g_numEntities;
+ cvar_t	*g_iscensored;
+@@ -561,6 +562,7 @@
+ 	gi.cvar( "gamename", JK_VERSION , CVAR_SERVERINFO | CVAR_ROM );
+ 	gi.cvar( "gamedate", SOURCE_DATE , CVAR_ROM );
+ 	g_skippingcin = gi.cvar ("skippingCinematic", "0", CVAR_ROM);
++	g_skipIntroCinematics = gi.cvar ("g_skipIntroCinematics", "0", CVAR_ARCHIVE);//when 1, scripted map cutscenes auto-fast-forward instead of waiting for the player to press use to skip
+ 
+ 	// latched vars
+ 
+@@ -587,7 +589,7 @@
  	g_saberRealisticCombat = gi.cvar( "g_saberRealisticCombat", "0", CVAR_ARCHIVE );//makes collision more precise, increases damage
  	g_saberMoveSpeed = gi.cvar( "g_saberMoveSpeed", "1", CVAR_ARCHIVE|CVAR_CHEAT );//how fast you run while attacking with a saber
  	g_saberAnimSpeed = gi.cvar( "g_saberAnimSpeed", "1", CVAR_ARCHIVE|CVAR_CHEAT );//how fast saber animations run
@@ -65,6 +81,32 @@
  
  	g_AIsurrender = gi.cvar( "g_AIsurrender", "0", CVAR_CHEAT );
  	g_numEntities = gi.cvar( "g_numEntities", "0", CVAR_CHEAT );
+--- a/codeJK2/game/g_active.cpp
++++ b/codeJK2/game/g_active.cpp
+@@ -1994,6 +1994,7 @@
+ 	if ( ent->s.number == 0 )
+ 	{
+ extern cvar_t	*g_skippingcin;
++extern cvar_t	*g_skipIntroCinematics;
+ 
+ 		if ( ent->s.eFlags & EF_LOCKED_TO_WEAPON )
+ 		{
+@@ -2046,6 +2047,15 @@
+ 		{
+ 			// watch the code here, you MUST "return" within this IF(), *unless* you're stopping the cinematic skip.
+ 			//
++			// g_skipIntroCinematics: auto-fast-forward scripted map cutscenes without
++			// waiting for the player to press use. Kick off the same skip path the use
++			// button would; once skipping, fall through to the normal think so a second
++			// use press (or the cutscene ending) can still stop the skip.
++			if ( g_skipIntroCinematics->integer && !g_skippingcin->integer )
++			{
++				G_StartCinematicSkip();
++				return;
++			}
+ 			if ( ClientCinematicThink(ent->client) )
+ 			{
+ 				if (g_skippingcin->integer)	// already doing cinematic skip?
 --- a/codeJK2/cgame/cg_view.cpp
 +++ b/codeJK2/cgame/cg_view.cpp
 @@ -1872,7 +1872,14 @@

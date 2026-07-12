@@ -23,8 +23,9 @@ day. Three of its combat defaults read as dated on modern high-DPI, high
    low enough that bolts read as lobbed "slugs" you could stroll around,
    rather than the snappy near-hitscan of a modern shooter.
 
-This change modernizes all three. It is engine-side (gamecode +
-client-game), shipped as patch
+This change modernizes those, and adds an opt-in to auto-skip the
+scripted map-intro cutscenes. It is engine-side (gamecode + client-game),
+shipped as patch
 [`patches/0024-modern-combat.patch`](../patches/0024-modern-combat.patch);
 no asset or retail-file changes are involved.
 
@@ -113,6 +114,45 @@ Enemy shots stay evadable: NPC blaster velocity is still cut by
 `BLASTER_NPC_VEL_CUT` / `BLASTER_NPC_HARD_VEL_CUT`, so with the player at
 4600 an ordinary trooper bolt lands around the old player speed.
 
+### 5. Optional cutscene auto-skip
+
+`g_skipIntroCinematics` (new cvar, default `0`).
+
+JK2 plays scripted in-engine cutscenes (ICARUS camera sequences) at the
+start of many campaign maps. They can always be skipped by pressing *use*,
+which fast-forwards the sequence (the game bumps `timescale` to 100 until
+the camera ends). With `g_skipIntroCinematics 1`, that same skip fires
+automatically the moment a cutscene starts — so maps drop you straight
+into player control without a keypress.
+
+Default is `0` (cutscenes play), so the campaign's storytelling is intact
+out of the box. Set to `1` if you want to blow past every scripted intro
+(handy for replays and for automated testing).
+
+| Cvar | Default | Meaning |
+|---|---|---|
+| `g_skipIntroCinematics` | `0` | `0` = scripted map cutscenes play. `1` = auto-fast-forward them into player control. |
+
+Implementation: `codeJK2/game/g_active.cpp`, in the in-camera branch of
+`ClientThink_real` — when the cvar is on and we are not already skipping,
+it calls the same `G_StartCinematicSkip()` the *use* button triggers.
+
+## Installer options
+
+The co-op installers write these choices into `base/autoexec_sp.cfg` (the
+engine execs it at startup, after `openjo_sp.cfg`, so it overrides a stale
+config that may have persisted the old values):
+
+| Flag (Linux/macOS) | Flag (Windows) | Effect |
+|---|---|---|
+| `--combat modern` (default) | `-Combat modern` | Free aim, fixed crosshair, FOV-independent sensitivity |
+| `--combat classic` | `-Combat classic` | Legacy auto-aim, dynamic crosshair, FOV-linked sensitivity |
+| `--skip-cutscenes` | `-SkipCutscenes` | Auto-skip scripted map-intro cutscenes |
+| `--no-skip-cutscenes` | `-NoSkipCutscenes` | Never auto-skip (suppress the prompt) |
+
+On an interactive run the cutscene-skip choice is prompted; combat mode
+defaults to modern unless `--combat classic` is passed.
+
 ## Reverting to classic feel
 
 Everything is a cvar or a build-time constant:
@@ -121,6 +161,7 @@ Everything is a cvar or a build-time constant:
 seta g_saberAutoAim 1          // classic saber auto-aim
 seta cg_fovSensitivityScale 1  // classic FOV-linked sensitivity
 seta cg_dynamicCrosshair 1     // classic muzzle-traced dynamic crosshair
+seta g_skipIntroCinematics 0   // let map-intro cutscenes play (default)
 ```
 
 Projectile speeds are compile-time; to restore them, edit the velocities
@@ -135,5 +176,5 @@ The change builds into the single-player module `jospgamex86_64.so`
 
 ```
 ninja -C openjk/build jospgamex86_64
-strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale|cg_dynamicCrosshair'
+strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale|cg_dynamicCrosshair|g_skipIntroCinematics'
 ```

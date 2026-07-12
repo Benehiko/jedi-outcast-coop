@@ -26,8 +26,11 @@ Combat is modernized for today's hardware: mouse aim is decoupled from
 FOV (no more sluggish, hyper-sensitive feel on high-DPI mice), the
 crosshair is fixed at screen center instead of drifting behind the view,
 saber auto-aim no longer snaps onto nearby enemies by default, and
-blaster bolts fly roughly twice as fast — all opt-in via cvars
-([docs/modern-combat.md](docs/modern-combat.md)).
+blaster bolts fly roughly twice as fast. There's also an opt-in to
+auto-skip scripted map-intro cutscenes. All of it is cvar-controlled, and
+the installers can write your choice (`--combat modern|classic`,
+`--skip-cutscenes`) — see
+[docs/modern-combat.md](docs/modern-combat.md).
 
 In progress: syncing the campaign UI — objectives, mission text,
 cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).

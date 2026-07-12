@@ -56,6 +56,18 @@
     Build the Real-ESRGAN hi-res texture override. Also a Linux GPU-only mod;
     offered here as a printed command.
 
+.PARAMETER Combat
+    Combat feel: 'modern' (default; free aim, fixed screen-center crosshair,
+    FOV-independent sensitivity, faster bolts) or 'classic' (legacy auto-aim,
+    dynamic muzzle-traced crosshair, FOV-linked sensitivity). Written to
+    base\autoexec_sp.cfg so it overrides a stale openjo_sp.cfg on disk.
+
+.PARAMETER SkipCutscenes
+    Auto-skip scripted map-intro cutscenes (off by default).
+
+.PARAMETER NoSkipCutscenes
+    Never auto-skip cutscenes (suppress the prompt).
+
 .PARAMETER All
     Enable every optional mod above.
 
@@ -89,6 +101,10 @@ param(
     [switch]$WithWidescreen,
     [switch]$WithTextures,
     [switch]$WithUpscale,
+    [ValidateSet('modern','classic')]
+    [string]$Combat = 'modern',
+    [switch]$SkipCutscenes,
+    [switch]$NoSkipCutscenes,
     [switch]$All,
     [switch]$NoOptional,
     [switch]$Yes,
@@ -270,6 +286,39 @@ function Build-WidescreenPak ([string]$gameData, [string]$outPk3) {
     }
 }
 
+# Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
+# cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
+# openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
+function Write-CombatConfig ([string]$baseDir) {
+    if ($Combat -eq 'classic') {
+        $aim = 1; $xhair = 1; $sens = 1
+        $desc = 'classic (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity)'
+    } else {
+        $aim = 0; $xhair = 0; $sens = 0
+        $desc = 'modern (free aim, fixed crosshair, FOV-independent sensitivity)'
+    }
+
+    $skip = 0
+    if ($SkipCutscenes) {
+        $skip = 1
+    } elseif (-not $NoSkipCutscenes) {
+        if (Resolve-Mod $false 'Auto-skip scripted map-intro cutscenes?') { $skip = 1 }
+    }
+
+    $cfg = Join-Path $baseDir 'autoexec_sp.cfg'
+    $lines = @(
+        '// Written by install-coop.ps1 - modern combat feel.'
+        '// Delete this file (or re-run with -Combat classic) to change it.'
+        "seta g_saberAutoAim `"$aim`""
+        "seta cg_dynamicCrosshair `"$xhair`""
+        "seta cg_fovSensitivityScale `"$sens`""
+        "seta g_skipIntroCinematics `"$skip`""
+    )
+    Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
+    Manifest-Add $cfg
+    Info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+}
+
 # Run the optional-mod stage after the core install.
 function Invoke-OptionalMods ([string]$gameData, [string]$baseDir) {
     $any = $false
@@ -308,6 +357,10 @@ function Invoke-OptionalMods ([string]$gameData, [string]$baseDir) {
         Info "    tools/upscale-textures.sh --assets `"$gameData\base`" --out zzz-hires-textures.pk3"
         Info '(see docs/hires-textures.md)'
     }
+
+    # Modern combat feel + optional cutscene skip (always writes autoexec_sp.cfg).
+    Write-CombatConfig $baseDir
+    $any = $true
 
     if (-not $any) { Info 'no optional mods selected.' }
 }
