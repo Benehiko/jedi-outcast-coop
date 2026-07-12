@@ -286,6 +286,23 @@ write_combat_config() {
     } > "$cfg"
     manifest_add "$cfg"
     info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    # In modern mode, rescale the CONTROLS mouse-sensitivity slider so the UI can
+    # reach the lower modern values. zz- override pak from the user's own menus.
+    if [[ "$COMBAT_MODE" == modern ]]; then
+        local sm_tool="$ROOT/tools/build-sensitivity-menu-pk3.sh"
+        local sm_pak="$BASE_DIR/zz-sensitivity-menu.pk3"
+        if [[ -x "$sm_tool" ]]; then
+            if "$sm_tool" --assets "$BASE_DIR" --out "$sm_pak" >/dev/null 2>&1; then
+                manifest_add "$sm_pak"
+                info "installed zz-sensitivity-menu.pk3 (CONTROLS > MOUSE/JOYSTICK slider: 0.1–2)"
+            else
+                info "sensitivity-menu builder failed; run it manually: $sm_tool"
+            fi
+        else
+            info "sensitivity-menu builder not found: $sm_tool"
+        fi
+    fi
 }
 
 do_optional_mods() {

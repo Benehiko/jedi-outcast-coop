@@ -292,6 +292,50 @@ function Build-WidescreenPak ([string]$gameData, [string]$outPk3) {
     }
 }
 
+# Build the sensitivity-slider override pak natively. Reads the two SP control
+# menus from the user's own retail assets*.pk3, rewrites only the one sensitivity
+# cvarfloat line (retail "5 2 30" -> "0.5 0.1 2"), and writes zz-sensitivity-menu.pk3
+# so the CONTROLS mouse slider can reach the lower modern values. Returns $true on
+# success. Retail data is untouched.
+function Build-SensitivityPak ([string]$baseDir, [string]$outPk3) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+    $enc  = [System.Text.Encoding]::GetEncoding('iso-8859-1')
+    $stock = "cvarfloat`t`t`t`"sensitivity`" 5 2 30"
+    $new   = "cvarfloat`t`t`t`"sensitivity`" 0.5 0.1 2"
+
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ("jk2-sens-" + [System.IO.Path]::GetRandomFileName())
+    $uiDir = Join-Path $work 'ui'
+    New-Item -ItemType Directory -Force -Path $uiDir | Out-Null
+    try {
+        $patched = 0
+        foreach ($name in @('controls.menu', 'ingamecontrols.menu')) {
+            # Find the first retail pak carrying this menu (case-insensitive entry).
+            foreach ($p in (Get-ChildItem -LiteralPath $baseDir -Filter 'assets*.pk3' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($p.FullName)
+                try {
+                    $entry = $zip.Entries | Where-Object { $_.FullName -ieq "ui/$name" } | Select-Object -First 1
+                    if (-not $entry) { continue }
+                    $ms = New-Object System.IO.MemoryStream
+                    $es = $entry.Open(); $es.CopyTo($ms); $es.Close()
+                    $content = $enc.GetString($ms.ToArray())
+                    if (-not $content.Contains($stock)) { continue }
+                    $content = $content.Replace($stock, $new)
+                    # Emit at the lowercase path the menu loader references.
+                    [System.IO.File]::WriteAllBytes((Join-Path $uiDir $name), $enc.GetBytes($content))
+                    $patched++
+                    break
+                } finally { $zip.Dispose() }
+            }
+        }
+        if ($patched -lt 1) { Info 'sensitivity: no control menu with the stock slider found; skipped.'; return $false }
+        if (Test-Path -LiteralPath $outPk3) { Remove-Item -LiteralPath $outPk3 -Force }
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($work, $outPk3)
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
 # cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
 # openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
@@ -328,6 +372,20 @@ function Write-CombatConfig ([string]$baseDir) {
     Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
     Manifest-Add $cfg
     Info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    # In modern mode, rescale the CONTROLS mouse-sensitivity slider (retail min 2)
+    # so the UI can reach the lower modern values.
+    if ($Combat -ne 'classic') {
+        $smPak = Join-Path $baseDir 'zz-sensitivity-menu.pk3'
+        try {
+            if (Build-SensitivityPak $baseDir $smPak) {
+                Manifest-Add $smPak
+                Info 'installed zz-sensitivity-menu.pk3 (CONTROLS mouse slider: 0.1-2)'
+            }
+        } catch {
+            Info "sensitivity-menu build failed ($($_.Exception.Message))."
+        }
+    }
 }
 
 # Run the optional-mod stage after the core install.
