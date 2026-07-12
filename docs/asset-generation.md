@@ -128,26 +128,52 @@ image (torch `2.10.0+rocm7.2`), `/dev/kfd` + `/dev/dri` passed through, the mode
 downloads and the pipeline loads and *starts* generating, but 16 GB is not enough
 to finish a bf16 run:
 
-- `full` / `model` modes **OOM the GPU** at the denoise step (the transformer
-  alone is ~12 GB bf16, plus activations).
-- `sequential` mode fits the GPU but needs ~24 GB of **host RAM** for the offloaded
-  model; on a host that is already tight it can be OOM-killed.
+- **bf16 `full` / `model`** OOM the GPU at denoise (the transformer alone is
+  ~12 GB bf16, plus activations).
+- **bf16 `sequential`** fits the GPU but needs ~24 GB host RAM for the offloaded
+  model, and — critically — repeatedly **hard-faults the GPU** mid-denoise on
+  gfx1201 ("Memory access fault by GPU node-1 … Page not present", GPU
+  coredump). This can also corrupt the running desktop; avoid it on RDNA4.
+- The **VAE decode** in bf16/fp16 on gfx1201 produces **NaNs → a black image**
+  (the transformer's latents are fine; only the decode is bad). The tool works
+  around this by default (`GEN_VAE_FP32=1`): it decodes the latents on the CPU
+  in fp32 with a separate, unhooked VAE — numerically bulletproof.
 - The tool sets `TORCH_BLAS_PREFER_HIPBLASLT=0` by default because RDNA4's fused
-  `hipBLASLt` path can throw `HIPBLAS_STATUS_*` errors mid-generation; the plain
-  BLAS path is used instead.
+  `hipBLASLt` path throws `HIPBLAS_STATUS_*` errors mid-generation.
 
-To generate on 16 GB, use one of:
+**The most reliable path on 16 GB is `GEN_FP8=1`** (built in): it quantizes the
+transformer + T5 text encoder to fp8 with `optimum-quanto`, roughly halving the
+transformer so it fits in `model` offload **without** the fault-prone sequential
+path. In testing on the RX 9070 this cleared the transformer denoise with no GPU
+fault. Combine with the default CPU fp32 VAE decode:
 
-- a **≥24 GB** GPU (`full` mode, no offload), or
-- an **fp8 / quantized** FLUX build (~8 GB, fits 16 GB in `full` mode) — point
-  `--image` at an image that provides the quantized weights + `optimum-quanto`
-  or `bitsandbytes`, and add a quantized `from_pretrained` in the generation
-  step, or
-- `GEN_VRAM_MODE=sequential` **with enough free host RAM** (≥ ~28 GB free).
+```sh
+GEN_FP8=1 GEN_VRAM_MODE=model tools/generate-textures.sh --size 512
+```
+
+Tuning knobs (all environment variables):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `GEN_FP8` | `0` | `1` = fp8-quantize the transformer/T5 (fits 16 GB, avoids offload faults). |
+| `GEN_VRAM_MODE` | `auto` | `full` / `model` / `sequential` placement (see table above). |
+| `GEN_VAE_FP32` | `1` | `1` = CPU fp32 VAE decode (fixes the gfx1201 black-image NaN). |
+| `GEN_DTYPE` | `bf16` | `bf16` / `fp16` / `fp32` compute dtype. |
+| `GEN_ATTN` | `math` | `math` = eager SDPA (safe); `auto` = torch default. |
+| `TORCH_BLAS_PREFER_HIPBLASLT` | `0` | `0` avoids RDNA4's flaky fused BLAS. |
+
+Other routes to a finished pack: a **≥24 GB** GPU (`full`, no offload), or
+`GEN_VRAM_MODE=sequential` on **non-RDNA4** hardware with ≥ ~28 GB free host RAM.
 
 RDNA4 needs ROCm ≥ 7.2 either way. On NVIDIA, use `--cuda` with the NVIDIA
 container toolkit; a 16 GB+ NVIDIA card runs `model` offload comfortably and
 24 GB runs `full`.
+
+> **Status on 16 GB RDNA4:** as of this writing the fp8 path clears the
+> transformer without faulting but a full end-to-end pack had not yet been
+> produced on the 16 GB RX 9070 test card (generation was stopped to avoid
+> further GPU faults destabilising the desktop). fp8 is the recommended path;
+> a ≥24 GB or NVIDIA card is the sure one.
 
 ## Usage
 

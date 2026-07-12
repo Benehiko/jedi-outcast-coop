@@ -199,6 +199,19 @@ os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "0")
 import torch
 from diffusers import FluxPipeline
 
+# On some ROCm builds (notably RDNA4/gfx1201) the fused flash / memory-efficient
+# scaled-dot-product-attention kernels produce NaNs, which cast to a black image
+# at VAE decode. GEN_ATTN=math forces the numerically-safe eager SDPA math
+# kernel (slower but correct); "auto" leaves torch's default selection.
+if os.environ.get("GEN_ATTN", "math") == "math":
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+        print(">>> SDPA: forcing math kernel (GEN_ATTN=math)", flush=True)
+    except Exception as e:
+        print(f">>> SDPA backend select failed ({e}); using default", flush=True)
+
 size  = int(os.environ["GEN_SIZE"])
 steps = int(os.environ["GEN_STEPS"])
 seed  = int(os.environ["GEN_SEED"])
@@ -212,8 +225,70 @@ if device == "cpu":
     print("!!! no GPU visible to torch — generation would be extremely slow; aborting", file=sys.stderr, flush=True)
     sys.exit(3)
 
-dtype = torch.bfloat16
+dtype_name = os.environ.get("GEN_DTYPE", "bf16")
+dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}.get(dtype_name, torch.bfloat16)
+print(f">>> dtype: {dtype_name} ({dtype})", flush=True)
 pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=dtype, cache_dir="/models/hf")
+
+# fp8 path (GEN_FP8=1): quantize the transformer (and text encoder) weights to
+# fp8 with optimum-quanto. This roughly halves the transformer (~12 GB bf16 ->
+# ~6 GB), so it fits a 16 GB GPU in `model`/`full` placement and avoids the
+# fault-prone sequential offload. Quantization runs on CPU before the model
+# touches the GPU.
+if os.environ.get("GEN_FP8", "0") == "1":
+    try:
+        from optimum.quanto import freeze, qfloat8, quantize
+        print(">>> fp8: quantizing transformer + text_encoder_2 (optimum-quanto qfloat8)...", flush=True)
+        quantize(pipe.transformer, weights=qfloat8)
+        freeze(pipe.transformer)
+        if getattr(pipe, "text_encoder_2", None) is not None:
+            quantize(pipe.text_encoder_2, weights=qfloat8)
+            freeze(pipe.text_encoder_2)
+        print(">>> fp8: quantization complete", flush=True)
+    except Exception as e:
+        print(f"!!! fp8 quantization failed: {e}", file=sys.stderr, flush=True)
+        sys.exit(4)
+
+# The FLUX transformer produces valid latents on RDNA4, but the VAE *decode* in
+# bf16/fp16 on the GPU yields NaNs on gfx1201 (ROCm 7.2) -> a black image. When
+# GEN_VAE_FP32=1 (default) we decode the latents on the CPU in fp32: the VAE is
+# tiny, CPU fp32 decode is fast and numerically bulletproof, and it sidesteps
+# both the bad GPU kernel and the offload dtype hooks. GEN_VAE_FP32=0 decodes
+# on-device (the pipeline's normal path).
+VAE_CPU_FP32 = os.environ.get("GEN_VAE_FP32", "1") == "1"
+try:
+    pipe.vae.enable_tiling()
+except Exception:
+    pass
+
+# For CPU decode, load a SEPARATE, unhooked fp32 VAE pinned to the CPU. Reusing
+# pipe.vae is unreliable: under model/sequential offload it carries accelerate
+# hooks (and under fp8 its placement is hook-managed), so a manual .to("cpu")
+# is silently ignored and the conv weights stay on the GPU while the latents are
+# on the CPU -> "Input type (torch.FloatTensor) and weight type
+# (torch.cuda.FloatTensor) should be the same". A fresh CPU VAE has no hooks.
+_cpu_vae = None
+if VAE_CPU_FP32:
+    from diffusers import AutoencoderKL
+    _cpu_vae = AutoencoderKL.from_pretrained(
+        "black-forest-labs/FLUX.1-schnell", subfolder="vae",
+        torch_dtype=torch.float32, cache_dir="/models/hf",
+    ).to("cpu").eval()
+
+def decode_latents_cpu(latents):
+    import numpy as np
+    from PIL import Image
+    vcfg = _cpu_vae.config
+    lat = latents.detach().to("cpu", torch.float32)
+    # FLUX packs latents; unpack to the VAE's spatial layout.
+    vae_scale = 2 ** (len(vcfg.block_out_channels) - 1)
+    lat = pipe._unpack_latents(lat, size, size, vae_scale)
+    lat = (lat / vcfg.scaling_factor) + getattr(vcfg, "shift_factor", 0.0)
+    with torch.no_grad():
+        img = _cpu_vae.decode(lat, return_dict=False)[0]
+    img = (img / 2 + 0.5).clamp(0, 1)
+    arr = (img[0].permute(1, 2, 0).float().numpy() * 255).round().astype("uint8")
+    return Image.fromarray(arr)
 
 # FLUX.1-schnell in bf16 needs ~24 GB to live fully on the GPU, which OOMs on
 # consumer 16 GB cards even at 512x512. Choose a placement by available VRAM:
@@ -266,13 +341,24 @@ for i, (name, prompt) in enumerate(rows):
     # resident on the GPU), and keeps seeds reproducible across machines.
     s = (seed + int(hashlib.sha256(name.encode()).hexdigest(), 16)) % (2**31)
     g = torch.Generator(device="cpu").manual_seed(s)
-    img = pipe(
-        prompt,
-        height=size, width=size,
-        num_inference_steps=steps,
-        guidance_scale=0.0,          # schnell is guidance-distilled
-        generator=g,
-    ).images[0]
+    if VAE_CPU_FP32:
+        latents = pipe(
+            prompt,
+            height=size, width=size,
+            num_inference_steps=steps,
+            guidance_scale=0.0,      # schnell is guidance-distilled
+            generator=g,
+            output_type="latent",
+        ).images
+        img = decode_latents_cpu(latents)
+    else:
+        img = pipe(
+            prompt,
+            height=size, width=size,
+            num_inference_steps=steps,
+            guidance_scale=0.0,
+            generator=g,
+        ).images[0]
     out = os.path.join(outdir, f"{name}.png")
     img.save(out)
     print(f"    [{i+1}/{len(rows)}] {name} -> {out}", flush=True)
@@ -299,6 +385,10 @@ set +e
 "$RUNTIME" run --rm "${GPU_ARGS[@]}" "${HF_ENV[@]}" \
   -e GEN_SIZE="$SIZE" -e GEN_STEPS="$STEPS" -e GEN_SEED="$SEED" \
   -e GEN_VRAM_MODE="${GEN_VRAM_MODE:-auto}" \
+  -e GEN_DTYPE="${GEN_DTYPE:-bf16}" \
+  -e GEN_ATTN="${GEN_ATTN:-math}" \
+  -e GEN_VAE_FP32="${GEN_VAE_FP32:-1}" \
+  -e GEN_FP8="${GEN_FP8:-0}" \
   -e PYTORCH_HIP_ALLOC_CONF="expandable_segments:True" \
   -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" \
   -e TORCH_BLAS_PREFER_HIPBLASLT="${TORCH_BLAS_PREFER_HIPBLASLT:-0}" \
@@ -307,7 +397,7 @@ set +e
   "$IMAGE" \
   bash -lc '
     set -e
-    python -m pip install --quiet --no-input "diffusers>=0.30" "transformers>=4.43" accelerate sentencepiece protobuf safetensors pillow
+    python -m pip install --quiet --no-input "diffusers>=0.30" "transformers>=4.43" accelerate sentencepiece protobuf safetensors pillow optimum-quanto
     python /work/gen.py
   '
 RC=$?
