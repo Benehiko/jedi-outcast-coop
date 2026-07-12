@@ -1,0 +1,7 @@
+# ShellCheck configuration for this repo's tools/*.sh.
+#
+# SC2034 (variable appears unused): several scripts use `for i in $(seq …)` as a
+# fixed-count wait/poll loop where the counter itself is intentionally unused.
+# That pattern is fine and readable, so silence this one check globally rather
+# than sprinkling per-line `# shellcheck disable` directives.
+disable=SC2034
