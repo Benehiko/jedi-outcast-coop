@@ -1,0 +1,77 @@
+diff --git a/code/rd-vanilla/tr_backend.cpp b/code/rd-vanilla/tr_backend.cpp
+index 741bb95b..81234711 100644
+--- a/code/rd-vanilla/tr_backend.cpp
++++ b/code/rd-vanilla/tr_backend.cpp
+@@ -975,9 +975,36 @@ RB_SetGL2D
+ void	RB_SetGL2D (void) {
+ 	backEnd.projection2D = qtrue;
+ 
++	// The 2D HUD and menus are authored in a fixed 640x480 (4:3) virtual space.
++	// Stretching that across a wider framebuffer distorts every element, which
++	// is very visible on 16:9 and severe on 21:9 ultrawide. Instead, map the
++	// 640x480 virtual space to a centred 4:3 region of the framebuffer and leave
++	// the extra width as black pillarbox bars, so 2D art keeps its intended
++	// shape. The 3D world view still fills the screen (its FOV is widened
++	// separately by cg_fovAspectAdjust). r_aspectCorrect2D disables this to
++	// restore the legacy full-width stretch.
++	int x = 0, y = 0, w = glConfig.vidWidth, h = glConfig.vidHeight;
++	if ( r_aspectCorrect2D && r_aspectCorrect2D->integer && glConfig.vidHeight > 0 )
++	{
++		const float aspect = (float)glConfig.vidWidth / (float)glConfig.vidHeight;
++		const float target = 640.0f / 480.0f;
++		if ( aspect > target )
++		{
++			// too wide: pillarbox (bars left and right)
++			w = (int)( glConfig.vidHeight * target + 0.5f );
++			x = ( glConfig.vidWidth - w ) / 2;
++		}
++		else if ( aspect < target )
++		{
++			// too tall: letterbox (bars top and bottom)
++			h = (int)( glConfig.vidWidth / target + 0.5f );
++			y = ( glConfig.vidHeight - h ) / 2;
++		}
++	}
++
+ 	// set 2D virtual screen size
+-	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+-	qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
++	qglViewport( x, y, w, h );
++	qglScissor( x, y, w, h );
+ 	qglMatrixMode(GL_PROJECTION);
+     qglLoadIdentity ();
+ 	qglOrtho (0, 640, 480, 0, 0, 1);
+diff --git a/code/rd-vanilla/tr_init.cpp b/code/rd-vanilla/tr_init.cpp
+index 13c72e66..01f67409 100644
+--- a/code/rd-vanilla/tr_init.cpp
++++ b/code/rd-vanilla/tr_init.cpp
+@@ -45,6 +45,8 @@ cvar_t	*r_detailTextures;
+ 
+ cvar_t	*r_znear;
+ 
++cvar_t	*r_aspectCorrect2D;
++
+ cvar_t	*r_skipBackEnd;
+ 
+ cvar_t	*r_measureOverdraw;
+@@ -1561,6 +1563,7 @@ void R_Register( void )
+ 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_ARCHIVE_ND );	//if set any lower, you lose a lot of precision in the distance
+ 	ri.Cvar_CheckRange( r_znear, 0.001f, 10, qfalse ); // was qtrue in JA, is qfalse properly in ioq3
+ 	r_ignoreGLErrors = ri.Cvar_Get( "r_ignoreGLErrors", "1", CVAR_ARCHIVE_ND );
++	r_aspectCorrect2D = ri.Cvar_Get( "r_aspectCorrect2D", "1", CVAR_ARCHIVE );
+ 	r_fastsky = ri.Cvar_Get( "r_fastsky", "0", CVAR_ARCHIVE_ND );
+ 	r_drawSun = ri.Cvar_Get( "r_drawSun", "0", CVAR_ARCHIVE_ND );
+ 	r_dynamiclight = ri.Cvar_Get( "r_dynamiclight", "1", CVAR_ARCHIVE );
+diff --git a/code/rd-vanilla/tr_local.h b/code/rd-vanilla/tr_local.h
+index c9e745aa..ea07dfad 100644
+--- a/code/rd-vanilla/tr_local.h
++++ b/code/rd-vanilla/tr_local.h
+@@ -1088,6 +1088,8 @@ extern cvar_t	*r_verbose;				// used for verbose debug spew
+ 
+ extern cvar_t	*r_znear;				// near Z clip plane
+ 
++extern cvar_t	*r_aspectCorrect2D;		// pillarbox the 2D HUD/menus at aspect ratios wider than 4:3
++
+ extern cvar_t	*r_stencilbits;			// number of desired stencil bits
+ extern cvar_t	*r_depthbits;			// number of desired depth bits
+ extern cvar_t	*r_colorbits;			// number of desired color bits, only relevant for fullscreen

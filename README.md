@@ -17,6 +17,11 @@ game over the network — verified live. Linux has a one-command
 installer; Windows has a PowerShell installer (`tools/install-coop.ps1`).
 A macOS installer is written but not yet verified on real hardware.
 
+The engine also runs at modern resolutions — QHD, 4K, and ultrawide
+(21:9 / 32:9) — with the HUD and menus kept in correct proportion instead
+of stretched, and an opt-in widescreen field of view
+([docs/widescreen.md](docs/widescreen.md)).
+
 In progress: syncing the campaign UI — objectives, mission text,
 cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).
 Current task status: [docs/tasks.md](docs/tasks.md).
@@ -63,6 +68,7 @@ Hosting from the in-game console/menu and LAN discovery:
 |---|---|
 | [install-linux.md](docs/install-linux.md) / [install-macos.md](docs/install-macos.md) / [install-windows.md](docs/install-windows.md) | **Playing? Start here.** Per-OS install guides |
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
+| [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** Status: what's done, what's outstanding, as sitting-sized tasks |
