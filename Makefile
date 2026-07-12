@@ -25,8 +25,14 @@ build:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 # Mirror the CI lint job locally: format check (gofumpt + goimports) then lint.
+# `fmt --diff` exits 0 even when it prints a diff, so fail on a non-empty diff.
 lint:
-	golangci-lint fmt --diff
+	@out="$$(golangci-lint fmt --diff)"; \
+	if [ -n "$$out" ]; then \
+	  echo "code is not formatted; run 'make fmt':" >&2; \
+	  printf '%s\n' "$$out" >&2; \
+	  exit 1; \
+	fi
 	golangci-lint run --timeout=5m ./...
 
 # Apply formatters in place (gofumpt + goimports).

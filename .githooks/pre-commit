@@ -22,12 +22,15 @@ if ! git diff --cached --name-only --diff-filter=ACM | grep -q '\.go$'; then
 fi
 
 if command -v golangci-lint >/dev/null 2>&1; then
-  # Format check first — do not mutate/re-stage. If the diff is non-empty the
-  # author must run `make fmt` and re-stage, so the commit reflects what is staged.
+  # Format check first — do not mutate/re-stage. `fmt --diff` prints a diff but
+  # exits 0, so gate on the diff being non-empty (the same check CI runs). If it
+  # is non-empty the author must run `make fmt` and re-stage, so the commit
+  # reflects exactly what is staged.
   echo "pre-commit: golangci-lint fmt --diff"
-  if ! golangci-lint fmt --diff >/dev/null 2>&1; then
+  fmt_diff="$(golangci-lint fmt --diff 2>/dev/null)"
+  if [ -n "$fmt_diff" ]; then
     echo "pre-commit: code is not formatted. Run 'make fmt', then re-stage and commit." >&2
-    golangci-lint fmt --diff >&2 || true
+    printf '%s\n' "$fmt_diff" >&2
     exit 1
   fi
 
