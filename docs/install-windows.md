@@ -44,19 +44,25 @@ Either download the `jk2coop-windows` artifact from a green
   with the same `-DBuildJK2SP*` options shown in the
   [Linux guide](install-linux.md#1-build-the-binaries).
 
-The CI `jk2coop-windows` artifact (and a local build) produces three files:
-the engine `openjo_sp.x86_64.exe`, the renderer `rdjosp-vanilla_x86_64.dll`,
-and the gamecode `jospgamex86_64.dll`.
+The CI `jk2coop-windows` artifact (and a local build) produces the engine
+`openjo_sp.x86_64.exe`, the renderer `rdjosp-vanilla_x86_64.dll`, the gamecode
+`jospgamex86_64.dll`, and `SDL2.dll` (the engine's windowing library, loaded
+next to the exe).
 
 ## 2. Install with the PowerShell installer
 
 `tools/install-coop.ps1` performs an additive install — it never copies,
 overwrites, or modifies any retail file. It stages the co-op engine,
-renderer, gamecode DLL, and the Co-op UI overlay into a separate directory
-(by default `%LOCALAPPDATA%\jk2coop`) and writes two launcher scripts beside
-it. At runtime the engine loads your retail assets read-only from your
-`GameData` directory via `fs_cdpath`, while the co-op files load from the
-staging directory via `fs_basepath`.
+renderer, gamecode DLL, `SDL2.dll`, and the Co-op UI overlay into a separate
+directory (by default `%LOCALAPPDATA%\jk2coop`) and writes two launcher
+scripts beside it. At runtime the engine loads your retail assets read-only
+from your `GameData` directory via `fs_cdpath`, while the co-op files load
+from the staging directory via `fs_basepath`.
+
+The installer also ensures the **Visual C++ 2015-2022 redistributable** is
+present (the MSVC-built engine links the dynamic CRT and will not start
+without it) — it is a shared system component, so `-Uninstall` leaves it in
+place.
 
 From a PowerShell prompt in the repository root:
 

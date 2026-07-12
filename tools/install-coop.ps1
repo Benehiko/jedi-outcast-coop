@@ -72,6 +72,13 @@ $EngineExe   = 'openjo_sp.x86_64.exe'
 $RendererDll = 'rdjosp-vanilla_x86_64.dll'
 $GamecodeDll = 'jospgamex86_64.dll'
 $CoopUiPk3   = 'zz-coop-ui.pk3'
+$Sdl2Dll     = 'SDL2.dll'
+
+# Visual C++ 2015-2022 x64 redistributable. The MSVC-built engine links the
+# dynamic CRT (VCRUNTIME140.dll / MSVCP140.dll); a fresh Windows install does
+# not ship it, so the engine would fail to start without it.
+$VcRedistUrl   = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+$VcRedistProbe = 'MSVCP140.dll'
 
 $DefaultPort = 29070
 $DefaultMap  = 'kejim_post'
@@ -100,6 +107,42 @@ function Manifest-Add ([string]$path) {
 function Install-File ([string]$src, [string]$dst) {
     Copy-Item -LiteralPath $src -Destination $dst -Force
     Manifest-Add $dst
+}
+
+# Ensure the Visual C++ 2015-2022 x64 redistributable is present. The engine is
+# built with MSVC against the dynamic CRT, so without it the engine fails to
+# start with "VCRUNTIME140.dll / MSVCP140.dll was not found". This is a system
+# component (installed once, machine-wide) and is NOT tracked in the manifest —
+# -Uninstall leaves it in place, since other software may rely on it.
+function Install-VcRedist {
+    # Not applicable off Windows (e.g. running the script's tests under
+    # PowerShell on Linux). $IsWindows is $null on Windows PowerShell 5.1,
+    # where the script normally runs, so treat null as Windows.
+    if ($IsWindows -eq $false) { return }
+    $winRoot = $env:SystemRoot
+    if (-not $winRoot) { $winRoot = 'C:\Windows' }
+    if ([System.IO.File]::Exists((Join-Path (Join-Path $winRoot 'System32') $VcRedistProbe))) {
+        Info 'Visual C++ redistributable already present'
+        return
+    }
+    Say 'Installing the Visual C++ redistributable (required by the engine)...'
+    $tmp = Join-Path $env:TEMP 'vc_redist.x64.exe'
+    try {
+        Invoke-WebRequest -Uri $VcRedistUrl -OutFile $tmp -UseBasicParsing
+        $p = Start-Process -FilePath $tmp -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+            Info 'Visual C++ redistributable installed'
+            if ($p.ExitCode -eq 3010) {
+                Info 'note: a reboot may be required before the engine will start.'
+            }
+        } else {
+            Info "warning: Visual C++ redistributable installer exited with code $($p.ExitCode); install it manually if the engine will not start."
+        }
+    } catch {
+        Info "warning: could not install the Visual C++ redistributable automatically ($($_.Exception.Message))."
+        Info "         Download it from $VcRedistUrl and install it if the engine will not start."
+    }
 }
 
 # --- GameData autodetection ------------------------------------------------
@@ -283,6 +326,19 @@ could not find GameData under any Steam library.
     Install-File (Join-Path $binDir $EngineExe)   (Join-Path $StagingDir $EngineExe)
     Install-File (Join-Path $binDir $RendererDll) (Join-Path $StagingDir $RendererDll)
     Info "installed engine + renderer"
+
+    # SDL2.dll is a runtime dependency loaded next to the engine. The
+    # jk2coop-windows artifact ships it; copy it if present.
+    $sdlSrc = Join-Path $binDir $Sdl2Dll
+    if (Test-Path -LiteralPath $sdlSrc) {
+        Install-File $sdlSrc (Join-Path $StagingDir $Sdl2Dll)
+        Info "installed $Sdl2Dll"
+    } else {
+        Info "note: $Sdl2Dll not found next to the binaries - the engine needs it to start."
+    }
+
+    # Ensure the Visual C++ redistributable the MSVC engine links against.
+    Install-VcRedist
 
     # Co-op gamecode DLL into base\ (the SP gamecode loader searches
     # <basepath>\base for jospgamex86_64.dll).
