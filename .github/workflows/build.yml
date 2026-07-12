@@ -61,6 +61,29 @@ jobs:
         if: matrix.name == 'linux'
         run: cmake --build openjk/build
 
+      # A data-free sanity check: CI has no (proprietary) game assets, so we
+      # cannot run a map, but we can prove the three built artifacts are
+      # well-formed and export the module entry points the engine dlopen()s.
+      # This catches link-level breakage (a renderer that lost GetRefAPI, a
+      # gamecode module missing GetGameAPI/vmMain) that a bare compile would not.
+      - name: Sanity-check Linux artifacts
+        if: matrix.name == 'linux'
+        run: |
+          set -euo pipefail
+          eng=openjk/build/openjo_sp.x86_64
+          rend=openjk/build/code/rd-vanilla/rdjosp-vanilla_x86_64.so
+          game=openjk/build/codeJK2/game/jospgamex86_64.so
+          for f in "$eng" "$rend" "$game"; do
+            test -f "$f" || { echo "missing artifact: $f"; exit 1; }
+          done
+          file "$eng" | grep -q 'ELF 64-bit' || { echo "engine is not an ELF64 binary"; exit 1; }
+          echo "checking renderer exports GetRefAPI..."
+          nm -D "$rend" | grep -qE ' T GetRefAPI$'
+          echo "checking gamecode exports GetGameAPI + vmMain..."
+          nm -D "$game" | grep -qE ' T GetGameAPI$'
+          nm -D "$game" | grep -qE ' T vmMain$'
+          echo "artifact sanity checks passed"
+
       - name: Collect Linux artifacts
         if: matrix.name == 'linux'
         run: |

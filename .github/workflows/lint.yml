@@ -1,0 +1,71 @@
+name: lint
+
+# Fast, host-toolchain-free checks that should gate every change:
+#   * shellcheck over the shell tooling in tools/
+#   * the patch set applies cleanly, in order, to a pristine OpenJK submodule
+#     (this repo carries its engine changes as patches, so a drifted or broken
+#     patch is the single most likely way to break the build — catch it here,
+#     independently of the slower compile in build.yml).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck (tools/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # koalaman/shellcheck ships as a static binary in the runner image's
+      # package repo; no external action needed.
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --version
+
+      - name: Lint tools/*.sh
+        run: |
+          shopt -s nullglob
+          files=(tools/*.sh)
+          if (( ${#files[@]} == 0 )); then
+            echo "no shell scripts to lint"
+            exit 0
+          fi
+          printf 'linting: %s\n' "${files[@]}"
+          # -S warning: fail on warnings and errors (info/style are advisory).
+          # Repo .shellcheckrc silences the intentional-unused-counter check.
+          shellcheck -S warning "${files[@]}"
+
+  patches-apply:
+    name: patches apply to pristine submodule
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with OpenJK submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Assert submodule is pristine, then apply the full patch set
+        run: |
+          set -euo pipefail
+          # apply-patches.sh requires a clean submodule (the patches overlap and
+          # are cumulative). CI checks out a clean tree, so this mirrors the
+          # documented "reset then apply" workflow exactly.
+          git -C openjk checkout -- .
+          git -C openjk clean -fdq
+          tools/apply-patches.sh
+
+      - name: Show the resulting patched file set
+        run: |
+          echo "Patched files in the submodule:"
+          git -C openjk status --short | sed 's/^/  /'
+          # Fail if, somehow, nothing changed (would mean patches silently no-op'd).
+          test -n "$(git -C openjk status --short)"
