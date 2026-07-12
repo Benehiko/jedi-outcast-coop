@@ -57,10 +57,12 @@ The CONTROLS menu slider is also rescaled. Retail defines it as
 UI could not even reach the new low values. In modern mode the installers
 build a `zz-sensitivity-menu.pk3` override (via
 `tools/build-sensitivity-menu-pk3.sh`, from your own retail menus) that
-rescales it to `0.5 0.1 2`: default 0.5, min 0.1, max 2. The JK2 menu
-slider is a continuous drag with no discrete step, so the small range
-gives roughly 0.1 granularity across the bar rather than a hard snap;
-`sensitivity <n>` in the console still sets any exact value. Like the
+rescales it to `0.5 0.1 2` (default 0.5, min 0.1, max 2) and adds a small
+value readout next to the slider — an editfield bound to `sensitivity`, so
+it live-updates as you drag and you can click it to type an exact value.
+The JK2 menu slider is a continuous drag with no discrete step, so the
+small range gives roughly 0.1 granularity across the bar rather than a hard
+snap; `sensitivity <n>` in the console still sets any exact value. Like the
 widescreen menu mod, retail assets are never modified — remove it by
 deleting the one pak.
 

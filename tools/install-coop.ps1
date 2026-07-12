@@ -303,6 +303,32 @@ function Build-SensitivityPak ([string]$baseDir, [string]$outPk3) {
     $stock = "cvarfloat`t`t`t`"sensitivity`" 5 2 30"
     $new   = "cvarfloat`t`t`t`"sensitivity`" 0.5 0.1 2"
 
+    # Read-only-ish value readout, same group as the slider so it shows/hides with
+    # the MOUSE/JOYSTICK page. ITEM_TYPE_EDITFIELD repaints the cvar every frame, so
+    # it live-updates as the slider drags; clicking it lets you type an exact value.
+    $t = "`t"
+    $readout =
+        "`r`n" +
+        "$t${t}itemDef `r`n" +
+        "$t$t{`r`n" +
+        "$t$t${t}name${t}${t}${t}sensitivityvalue`r`n" +
+        "$t$t${t}group${t}${t}${t}joycontrols`r`n" +
+        "$t$t${t}type${t}${t}${t}ITEM_TYPE_EDITFIELD`r`n" +
+        "$t$t${t}style${t}${t}${t}WINDOW_STYLE_EMPTY`r`n" +
+        "$t$t${t}cvar${t}${t}${t}`"sensitivity`"`r`n" +
+        "$t$t${t}maxChars${t}${t}8`r`n" +
+        "$t$t${t}rect${t}${t}${t}594 211 46 20`r`n" +
+        "$t$t${t}textalign${t}${t}ITEM_ALIGN_LEFT`r`n" +
+        "$t$t${t}textalignx${t}${t}0`r`n" +
+        "$t$t${t}textaligny${t}${t}-2`r`n" +
+        "$t$t${t}font${t}${t}${t}2`r`n" +
+        "$t$t${t}textscale${t}${t}0.8`r`n" +
+        "$t$t${t}forecolor${t}${t}1 1 1 1`r`n" +
+        "$t$t${t}backcolor${t}${t}0 0 0 0`r`n" +
+        "$t$t${t}visible${t}${t}${t}0 `r`n" +
+        "$t$t}`r`n"
+    $sliderClose = "`r`n$t$t}`r`n"
+
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ("jk2-sens-" + [System.IO.Path]::GetRandomFileName())
     $uiDir = Join-Path $work 'ui'
     New-Item -ItemType Directory -Force -Path $uiDir | Out-Null
@@ -320,6 +346,14 @@ function Build-SensitivityPak ([string]$baseDir, [string]$outPk3) {
                     $content = $enc.GetString($ms.ToArray())
                     if (-not $content.Contains($stock)) { continue }
                     $content = $content.Replace($stock, $new)
+                    # Inject the readout right after the slider's itemDef close (the
+                    # first "\r\n\t\t}\r\n" after the rescaled cvarfloat line).
+                    $ai = $content.IndexOf($new)
+                    $ci = $content.IndexOf($sliderClose, $ai)
+                    if ($ci -ge 0) {
+                        $insAt = $ci + $sliderClose.Length
+                        $content = $content.Substring(0, $insAt) + $readout + $content.Substring($insAt)
+                    }
                     # Emit at the lowercase path the menu loader references.
                     [System.IO.File]::WriteAllBytes((Join-Path $uiDir $name), $enc.GetBytes($content))
                     $patched++

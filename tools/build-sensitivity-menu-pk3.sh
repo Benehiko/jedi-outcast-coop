@@ -12,11 +12,13 @@
 #   docs/modern-combat.md), but the menu slider still bottomed out at 2, so you
 #   could not reach or fine-tune the new low values from the UI.
 #
-#   This rescales the slider to `0.5 0.1 2` (default 0.5, min 0.1, max 2). The
-#   range is now small enough that dragging it gives ~0.1 granularity across the
-#   bar, and 2.0 becomes the top of the slider. (The engine has no explicit slider
-#   step, so this is smooth, not hard-snapped to 0.1 — you can still type an exact
-#   value with `sensitivity <n>` in the console.)
+#   This rescales the slider to `0.5 0.1 2` (default 0.5, min 0.1, max 2) and adds
+#   a small value readout next to it (an editfield bound to `sensitivity`, so it
+#   live-updates as you drag and lets you click+type an exact value). The range is
+#   now small enough that dragging gives ~0.1 granularity across the bar, and 2.0
+#   becomes the top of the slider. (The engine has no explicit slider step, so this
+#   is smooth, not hard-snapped to 0.1 — you can still type an exact value with
+#   `sensitivity <n>` in the console.)
 #
 # WHAT IT DOES (and the copyright shape)
 #   The menu files belong to Raven and live inside your retail assets*.pk3, so this
@@ -51,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     --assets) ASSETS="$2"; shift 2;;
     --out)    OUT="$2"; shift 2;;
     --range)  RANGE="$2"; shift 2;;
-    -h|--help) sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option: $1 (try --help)";;
   esac
 done
@@ -107,17 +109,59 @@ for f in "${MENUS[@]}"; do
     rm -f "$WORK/ui/$f"; continue
   fi
 
-  # Byte-exact replace to preserve CRLF + latin-1 encoding.
+  # Two edits, byte-exact to preserve CRLF + latin-1 encoding:
+  #  1) rescale the sensitivity cvarfloat line,
+  #  2) inject a read-only-ish editfield right after the slider's itemDef that
+  #     shows the live `sensitivity` value (and lets you click+type it).
   python3 - "$WORK/ui/$f" "$STOCK" "$NEW" <<'PY'
 import sys
 path, stock, new = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(path, 'rb') as fh:
     data = fh.read()
+
 sb, nb = stock.encode('latin-1'), new.encode('latin-1')
-n = data.count(sb)
-if n < 1:
+if data.count(sb) < 1:
     sys.stderr.write(f"error: sensitivity slider not found in {path}\n"); sys.exit(2)
-open(path, 'wb').write(data.replace(sb, nb))
+data = data.replace(sb, nb)
+
+# The value readout. Same group as the slider ('joycontrols') so it shows/hides
+# with the MOUSE/JOYSTICK page, positioned just right of the 128px slider bar.
+# ITEM_TYPE_EDITFIELD repaints the cvar every frame, so it live-updates as the
+# slider is dragged; clicking it lets you type an exact value.
+readout = (
+    "\r\n"
+    "\t\titemDef \r\n"
+    "\t\t{\r\n"
+    "\t\t\tname\t\t\tsensitivityvalue\r\n"
+    "\t\t\tgroup\t\t\tjoycontrols\r\n"
+    "\t\t\ttype\t\t\tITEM_TYPE_EDITFIELD\r\n"
+    "\t\t\tstyle\t\t\tWINDOW_STYLE_EMPTY\r\n"
+    "\t\t\tcvar\t\t\t\"sensitivity\"\r\n"
+    "\t\t\tmaxChars\t\t8\r\n"
+    "\t\t\trect\t\t\t594 211 46 20\r\n"
+    "\t\t\ttextalign\t\tITEM_ALIGN_LEFT\r\n"
+    "\t\t\ttextalignx\t\t0\r\n"
+    "\t\t\ttextaligny\t\t-2\r\n"
+    "\t\t\tfont\t\t\t2\r\n"
+    "\t\t\ttextscale\t\t0.8\r\n"
+    "\t\t\tforecolor\t\t1 1 1 1\r\n"
+    "\t\t\tbackcolor\t\t0 0 0 0\r\n"
+    "\t\t\tvisible\t\t\t0 \r\n"
+    "\t\t}\r\n"
+)
+
+# Anchor: the rescaled cvarfloat line, then the FIRST itemDef-closing "\r\n\t\t}\r\n"
+# after it (end of the slider block). Insert the readout right after that.
+anchor = nb
+ai = data.find(anchor)
+close = b"\r\n\t\t}\r\n"
+ci = data.find(close, ai)
+if ci < 0:
+    sys.stderr.write(f"error: could not find slider itemDef close in {path}\n"); sys.exit(3)
+ins_at = ci + len(close)
+data = data[:ins_at] + readout.encode('latin-1') + data[ins_at:]
+
+open(path, 'wb').write(data)
 PY
   echo ">>> patched ui/$f  (from '$SRC_ENTRY' in $(basename "$SRC"))"
   PATCHED=$((PATCHED+1))
@@ -132,6 +176,7 @@ rm -f "$OUT"
 
 echo ""
 echo ">>> built $OUT ($PATCHED menu file(s))"
-echo "    CONTROLS > \"Mouse Sensitivity\" slider is now $R_DEF default, $R_MIN min, $R_MAX max."
-echo "    The slider is continuous (no hard 0.1 step); type exact values with 'sensitivity <n>'."
+echo "    CONTROLS > \"Mouse Sensitivity\" slider is now $R_DEF default, $R_MIN min, $R_MAX max,"
+echo "    with a live value readout next to it (click it to type an exact value)."
+echo "    The slider is continuous (no hard 0.1 step); 'sensitivity <n>' sets exact values."
 echo "    To remove: rm '$OUT'"
