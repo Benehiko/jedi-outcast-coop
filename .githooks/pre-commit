@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# jk2coop pre-commit hook — runs the same fast checks the CI lint job runs, so
+# format/lint/compile failures surface locally before push.
+#
+# It is a thin dispatcher: it delegates to golangci-lint + go build, the same
+# tooling CI runs, so "passes the hook" and "passes CI" stay in lockstep. It runs
+# only the fast gates (format check, lint, build); the full test suite and any
+# slow scans are left to CI so the hook never blocks a commit for minutes.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# (or run: make hooks)
+#
+# Bypass for a single commit with: git commit --no-verify
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Only run Go checks when Go files are staged — docs/CI-only commits skip it.
+if ! git diff --cached --name-only --diff-filter=ACM | grep -q '\.go$'; then
+  exit 0
+fi
+
+if command -v golangci-lint >/dev/null 2>&1; then
+  # Format check first — do not mutate/re-stage. If the diff is non-empty the
+  # author must run `make fmt` and re-stage, so the commit reflects what is staged.
+  echo "pre-commit: golangci-lint fmt --diff"
+  if ! golangci-lint fmt --diff >/dev/null 2>&1; then
+    echo "pre-commit: code is not formatted. Run 'make fmt', then re-stage and commit." >&2
+    golangci-lint fmt --diff >&2 || true
+    exit 1
+  fi
+
+  echo "pre-commit: golangci-lint run"
+  golangci-lint run --timeout=5m ./...
+else
+  echo "pre-commit: golangci-lint not found on PATH — skipping lint+fmt (CI will still enforce them)" >&2
+fi
+
+echo "pre-commit: go build -mod=vendor ./..."
+go build -mod=vendor ./...
+
+echo "pre-commit: OK"

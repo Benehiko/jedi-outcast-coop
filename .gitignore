@@ -2,3 +2,8 @@ openjk/build/
 openjk/build-debug/
 assets/coop-ui/zz-coop-ui.pk3
 disk-*.qcow2
+
+# jk2coop tooling binary + release archives
+/jk2coop
+/jk2coop.exe
+/dist/

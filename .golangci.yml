@@ -1,0 +1,58 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Benehiko/jedi-outcast-coop
+    gofumpt:
+      extra-rules: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - revive
+    - gosec
+    - noctx
+    - contextcheck
+    - nilerr
+    - gocritic
+    - godot
+    - misspell
+    - whitespace
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+    gosec:
+      excludes:
+        # G204: this tool orchestrates external programs (git, zip, container
+        # runtimes, the engine) with caller-controlled paths by design.
+        - G204
+        # G304: reading files at operator-supplied paths (assets, manifests,
+        # patches) is the whole job of this tool.
+        - G304
+        # G301/G302/G306: this tool installs user-facing files with conventional
+        # perms — data dirs at 0755 and generated launcher scripts at 0755 so
+        # they are executable. The stricter 0750/0600 defaults do not fit.
+        - G301
+        - G302
+        - G306
+
+run:
+  timeout: 5m
+  modules-download-mode: vendor
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

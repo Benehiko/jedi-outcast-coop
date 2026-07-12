@@ -1,0 +1,47 @@
+name: go
+
+# Lint, build (all target platforms), and test the jk2coop tooling binary that
+# replaces the tools/*.sh scripts. Runs on the host toolchain — no game data or
+# OpenJK submodule is needed, so this is fast and always green.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: lint + build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Lint (golangci-lint fmt + run)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.1.6
+          args: --timeout=5m
+
+      - name: Format check
+        run: golangci-lint fmt --diff
+
+      - name: Build (host)
+        run: go build -mod=vendor ./...
+
+      - name: Cross-compile (darwin, windows)
+        run: |
+          GOOS=darwin  GOARCH=amd64 go build -mod=vendor ./...
+          GOOS=darwin  GOARCH=arm64 go build -mod=vendor ./...
+          GOOS=windows GOARCH=amd64 go build -mod=vendor ./...
+
+      - name: Test (race)
+        run: go test -mod=vendor -race ./...

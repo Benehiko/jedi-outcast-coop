@@ -69,6 +69,12 @@ On Windows (from the `jk2coop-windows` CI artifact or a local build):
     jk2coop-host.cmd                   # host a game on UDP 29070
     jk2coop-join.cmd <host-ip>         # join it from another machine
 
+The same install/patch/pak steps are also available as a single
+cross-platform Go binary, `jk2coop` (`jk2coop install`, `jk2coop patches
+apply`, `jk2coop pk3 …`) — the recommended path on all three OSes, with
+pre-built binaries on every release. See [docs/tooling.md](docs/tooling.md).
+The `tools/*.sh` scripts remain and continue to work unchanged.
+
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).
 
@@ -85,6 +91,7 @@ Hosting from the in-game console/menu and LAN discovery:
 | [asset-formats.md](docs/asset-formats.md) | Reference: the game's file formats (`.pk3`, `.md3`, `.glm`/`.gla`, `.bsp`, …) and how to open them in Blender |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
 | [testing.md](docs/testing.md) | Verifying changes headlessly: the single-instance and co-op screenshot harnesses |
+| [tooling.md](docs/tooling.md) | The cross-platform `jk2coop` Go binary: patches, pak building, install/uninstall |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** Status: what's done, what's outstanding, as sitting-sized tasks |
 | [campaign-ui-plan.md](docs/campaign-ui-plan.md) | Track F plan: syncing objectives, mission text, and cutscenes to joiners |
