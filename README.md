@@ -83,6 +83,7 @@ Hosting from the in-game console/menu and LAN discovery:
 | [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
+| [testing.md](docs/testing.md) | Verifying changes headlessly: the single-instance and co-op screenshot harnesses |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** Status: what's done, what's outstanding, as sitting-sized tasks |
 | [campaign-ui-plan.md](docs/campaign-ui-plan.md) | Track F plan: syncing objectives, mission text, and cutscenes to joiners |
