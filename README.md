@@ -69,6 +69,7 @@ Hosting from the in-game console/menu and LAN discovery:
 | [install-linux.md](docs/install-linux.md) / [install-macos.md](docs/install-macos.md) / [install-windows.md](docs/install-windows.md) | **Playing? Start here.** Per-OS install guides |
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
 | [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
+| [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
