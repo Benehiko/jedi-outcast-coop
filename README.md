@@ -1,21 +1,25 @@
 # Jedi Outcast Rebuild
 
-Native Linux build of Jedi Outcast singleplayer with **cooperative
-campaign play** — up to four players in one campaign game.
+A build of Jedi Outcast singleplayer with **cooperative campaign play**
+— up to four players in one campaign game — for **Linux and Windows**.
 
 ## Status
 
 Working today, verified in a live session: one player **hosts the
 campaign** (briefing, objectives, scripted NPCs) and up to three others
 join over UDP/LAN, spawn beside the host, and play with their own fully
-rendered view. Hosting, LAN discovery, an in-game Co-op menu, and a
-one-command Linux installer are all in. A macOS installer is written
-(not yet verified on real hardware).
+rendered view. Hosting, LAN discovery, and an in-game Co-op menu are all
+in.
+
+**Linux and Windows both run the co-op engine**, and they interoperate:
+a Windows host and a Linux client (or the reverse) can play the same
+game over the network — verified live. Linux has a one-command
+installer; Windows has a PowerShell installer (`tools/install-coop.ps1`).
+A macOS installer is written but not yet verified on real hardware.
 
 In progress: syncing the campaign UI — objectives, mission text,
-cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)),
-and the Windows installer. Current task status:
-[docs/tasks.md](docs/tasks.md).
+cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).
+Current task status: [docs/tasks.md](docs/tasks.md).
 
 ## Installing
 
@@ -35,14 +39,20 @@ files — your game install is never copied from or modified.
 | OS | Guide | Status |
 |---|---|---|
 | Linux | [docs/install-linux.md](docs/install-linux.md) | one-command installer |
+| Windows | [docs/install-windows.md](docs/install-windows.md) | PowerShell installer; co-op verified live |
 | macOS | [docs/install-macos.md](docs/install-macos.md) | one-command installer (not yet run on real hardware) |
-| Windows | [docs/install-windows.md](docs/install-windows.md) | experimental — engine builds, installer pending |
 
 The short version on Linux, once built ([docs/building.md](docs/building.md)):
 
     tools/install-coop.sh              # symlinks your Steam assets + co-op gamecode into place
     jk2coop-host                       # host a game on UDP 29070
     jk2coop-join <host-ip>             # join it from another machine
+
+On Windows (from the `jk2coop-windows` CI artifact or a local build):
+
+    powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1
+    jk2coop-host.cmd                   # host a game on UDP 29070
+    jk2coop-join.cmd <host-ip>         # join it from another machine
 
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).

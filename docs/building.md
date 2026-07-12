@@ -20,6 +20,22 @@ Requires: cmake, ninja, gcc, SDL2, OpenAL, zlib, libpng, libjpeg.
 git clone --recurse-submodules <repo>
 cd jedi-outcast-rebuild
 tools/apply-patches.sh              # apply the co-op patches to the submodule
+```
+
+The patches are cumulative and overlap (several touch the same lines — e.g.
+one patch sets `MAX_CLIENTS` to 2 and a later one changes it to 4). They apply
+cleanly in order to a **pristine** submodule, but `apply-patches.sh` is not
+idempotent on a dirty tree: re-running it against an already-patched submodule
+can fail on an overlapping patch. To re-apply, reset the submodule first:
+
+```sh
+git -C openjk checkout -- . && git -C openjk clean -fd
+tools/apply-patches.sh
+```
+
+Continuing the build:
+
+```sh
 
 cmake -S openjk -B openjk/build -G Ninja \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \

@@ -1,14 +1,16 @@
 # Installing on Windows
 
-> **Status: experimental.** The Windows *engine* builds under MSVC: the
-> winsock port (patch 0016) makes the co-op UDP transport compile, and patch
-> 0005 links `wsock32` into the JK2SP engine so it also *links* (without that
-> library the build failed with winsock `LNK2019` unresolved externals). CI
-> now produces `openjo_sp.x86_64.exe` and the gamecode and renderer DLLs.
-> A PowerShell installer, `tools/install-coop.ps1`, is provided (see § 2);
-> its logic is verified but it has not yet been run against a real retail
-> install on live Windows hardware — that final check is task **C4** in
-> [tasks.md](tasks.md). Contributions welcome.
+> **Status: working, verified live.** The Windows engine builds under MSVC —
+> the winsock port (patch 0016) makes the co-op UDP transport compile, and
+> patch 0005 links `wsock32` into the JK2SP engine so it also *links* (without
+> that library the build failed with winsock `LNK2019` unresolved externals).
+> CI produces `openjo_sp.x86_64.exe`, the gamecode and renderer DLLs, and
+> `SDL2.dll`. The PowerShell installer `tools/install-coop.ps1` (see § 2) has
+> been run against a real retail install on Windows 10: the campaign plays,
+> and co-op works both cross-platform (a Windows host with a Linux client, and
+> the reverse) and between two Windows clients. This is still young — it is
+> "experimental" in the sense of not yet widely exercised across Windows
+> versions/hardware, so contributions and bug reports are welcome.
 
 ## Before you start: you need a legal copy of the game
 

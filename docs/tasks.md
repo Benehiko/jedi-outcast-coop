@@ -18,7 +18,7 @@ order; renumber freely if they don't. One patch per task unless noted.
 Legend: each task lists what it **needs** (dependencies), what to
 **do**, and what **done** looks like (a check you can run, not a feeling).
 
-## Status (2026-07-11)
+## Status (2026-07-12)
 
 ### Completed
 
@@ -26,9 +26,19 @@ Legend: each task lists what it **needs** (dependencies), what to
   NPCs render on the joiner) = patch **0014**, character velocity/lean =
   **0015**; M4 render-stability confirmed by a 10-minute headless soak.
 - **Track C** (distribution): C1 Linux installer, C2 CI
-  (`.github/workflows/build.yml`), C3 winsock (patch **0016**), C5 macOS
+  (`.github/workflows/build.yml`), C3 winsock (patch **0016**),
+  **C4 Windows installer** (`tools/install-coop.ps1`), C5 macOS
   installer (`tools/install-coop-macos.sh`, logic validated off-Mac).
   Patch 0007 regenerated so `apply-patches.sh` runs clean.
+  C4 is **verified live**: patch 0005 links `wsock32` into the JK2SP
+  engine (fixing the winsock `LNK2019` unresolved externals) so it links
+  under MSVC and the CI `jk2coop-windows` artifact builds — now shipping
+  `SDL2.dll` alongside the exe and DLLs. `install-coop.ps1` autodetects
+  `GameData` (Steam registry + `libraryfolders.vdf`), stages the co-op
+  files additively (retail untouched), installs the VC++ redistributable,
+  and writes host/join `.cmd` launchers with `-Uninstall`. Confirmed on a
+  real Windows 10 machine: the campaign plays, and co-op works both
+  Windows↔Linux (cross-platform) and between two Windows clients.
 - **Track D** (co-op UX): D1 `coop_host` (**0017**), D2 `localservers`
   LAN discovery (**0018**), D3 in-game Co-op menu (**0019** +
   `zz-coop-ui.pk3`). Verified headless via `uimenu coopMenu` + screenshot.
@@ -50,19 +60,6 @@ Legend: each task lists what it **needs** (dependencies), what to
   get world + entities but no objectives, mission text, cutscene
   handling, or verified level transitions. Plan + task breakdown:
   [campaign-ui-plan.md](campaign-ui-plan.md); tasks F1–F5 below.
-- **C4 — Windows installer**: the engine now links under MSVC — patch
-  0005 links `wsock32` into the JK2SP engine, fixing the 13 winsock
-  `LNK2019` unresolved externals (`WSAStartup`, `socket`, `bind`,
-  `sendto`, …) that patch 0016's `net_ip.cpp` introduced but never
-  linked, so the CI `jk2coop-windows` artifact now builds (the artifact
-  glob was also corrected: the engine is `openjo_sp.x86_64.exe`, not
-  `openjo_sp.exe`). The installer `tools/install-coop.ps1` is written —
-  it autodetects `GameData` via the Steam registry key +
-  `libraryfolders.vdf`, stages the co-op files additively (retail
-  untouched), writes host/join `.cmd` launchers, and supports
-  `-Uninstall`; its logic is verified end-to-end on a mock tree. What
-  remains is running it against a real retail install on a live Windows
-  machine and confirming the engine hosts/joins there.
 - **C6 — macOS real-hardware verification**: `install-coop-macos.sh` is
   shellcheck-clean and validated against a mock build tree on Linux; it
   has not yet been run on a real Mac.
@@ -233,17 +230,17 @@ modify the retail install (add files only).
   Done: Linux build unchanged (regression passes); the Windows CI leg
   from C2 compiles and links; two-client test on Linux still works.
 
-- [ ] **C4 — Windows installer.** (no patch)
-  Needs: C2 + C3 producing Windows artifacts. Ideally test on a real
-  Windows machine; a wine smoke-test is better than nothing.
-  Do: `tools/install-coop.ps1` per plan § C3: locate GameData via
-  registry (`HKCU:\Software\Valve\Steam` → `SteamPath`) +
-  `libraryfolders.vdf`, `-GameData` override; copy `openjo_sp.exe`,
-  renderer DLL and gamecode DLL **into** `GameData\base`'s parent
-  (additive only); host/join `.cmd` launchers; `-Uninstall` removes
-  exactly the copied files.
-  Done: on Windows with Steam JK2: install → host a game → second
-  machine joins; uninstall leaves the retail dir byte-identical.
+- [x] **C4 — Windows installer.** (patch 0005 links `wsock32`)
+  `tools/install-coop.ps1`: locates GameData via the Steam registry key
+  (`HKCU:\Software\Valve\Steam` → `SteamPath`) + `libraryfolders.vdf`,
+  with a `-GameData` override; stages the engine (`openjo_sp.x86_64.exe`),
+  renderer DLL, gamecode DLL, `SDL2.dll` and the Co-op UI overlay into a
+  staging dir (additive; retail assets read via `fs_cdpath`, never
+  touched); installs the VC++ redistributable; writes host/join `.cmd`
+  launchers; `-Uninstall` removes exactly what it created.
+  Done, verified on a real Windows 10 machine: install → the campaign
+  plays; a Linux client joins the Windows host (cross-platform) and two
+  Windows clients play together; uninstall leaves the retail dir intact.
 
 - [x] **C5 — macOS installer.** (no patch — outer repo only)
   Needs: T0. Not in the original plan; added alongside C1.
@@ -497,7 +494,8 @@ task. Every task keeps the solo loopback regression green.
 | 8 | E1 → E2 → E3 | Gated on A-M4 by design |
 | 9 | C4 | Last: needs C2+C3 artifacts and a Windows test machine |
 
-Everything above is done except C4. What remains, in suggested order:
+Everything above is done (C4 included — verified live on Windows). What
+remains, in suggested order:
 
 | Order | Task | Why then |
 |---|---|---|
@@ -505,4 +503,4 @@ Everything above is done except C4. What remains, in suggested order:
 | 2 | F4 investigation | Biggest unknown in Track F — scout it before committing to F3's shape |
 | 3 | F3 | Depends on F2's event channel |
 | 4 | F4 fix → F5 | Transition fix lands on the routing pattern; F5 seals the track |
-| 5 | C4, C6 | Hardware-gated (Windows box, real Mac) — do whenever the hardware appears |
+| 5 | C6 | Hardware-gated (real Mac) — do whenever the hardware appears |
