@@ -78,6 +78,33 @@ The `tools/*.sh` scripts remain and continue to work unchanged.
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).
 
+## The `jk2coop` tool (Go)
+
+The patch/pak/install tooling is also a single cross-platform Go binary,
+`jk2coop`. Pre-built binaries for Linux, macOS, and Windows are attached to
+every [release](https://github.com/Benehiko/jedi-outcast-coop/releases) — grab
+one and skip the build. To build it yourself you need **Go 1.26.5+**:
+
+```sh
+make build            # produces ./jk2coop (version metadata baked in)
+# or, without make:
+go build -mod=vendor -o jk2coop .
+```
+
+Dependencies are vendored, so the build is offline and reproducible. Then:
+
+```sh
+./jk2coop patches apply          # apply the co-op patches to the submodule
+./jk2coop pk3 coop-ui            # build the co-op UI overlay pak
+./jk2coop install                # stage the data dir + launchers (autodetects Steam)
+./jk2coop install --uninstall    # remove exactly what it installed
+./jk2coop --help                 # full command list
+```
+
+Development targets: `make fmt` (gofumpt + goimports), `make lint` (mirrors CI),
+`make test` (race), `make hooks` (enable the pre-commit hook). Full command
+reference and design notes: [docs/tooling.md](docs/tooling.md).
+
 ## Documentation
 
 | Document | What it is |
