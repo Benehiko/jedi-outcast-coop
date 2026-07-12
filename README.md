@@ -22,6 +22,12 @@ The engine also runs at modern resolutions — QHD, 4K, and ultrawide
 of stretched, and an opt-in widescreen field of view
 ([docs/widescreen.md](docs/widescreen.md)).
 
+Combat is modernized for today's hardware: mouse aim is decoupled from
+FOV (no more sluggish, hyper-sensitive feel on high-DPI mice), saber
+auto-aim no longer snaps onto nearby enemies by default, and blaster
+bolts fly roughly twice as fast — all opt-in via cvars
+([docs/modern-combat.md](docs/modern-combat.md)).
+
 In progress: syncing the campaign UI — objectives, mission text,
 cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).
 Current task status: [docs/tasks.md](docs/tasks.md).
@@ -69,6 +75,7 @@ Hosting from the in-game console/menu and LAN discovery:
 | [install-linux.md](docs/install-linux.md) / [install-macos.md](docs/install-macos.md) / [install-windows.md](docs/install-windows.md) | **Playing? Start here.** Per-OS install guides |
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
 | [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
+| [modern-combat.md](docs/modern-combat.md) | Modernized combat feel: FOV-independent aim, saber auto-aim off by default, faster blaster bolts (all cvar/opt-in) |
 | [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
