@@ -109,8 +109,14 @@ jobs:
           # MSVC names the engine openjo_sp.x86_64.exe (matching the Linux
           # openjo_sp.x86_64), not openjo_sp.exe. Fail loudly if the exe is
           # ever missing rather than silently shipping DLLs with no engine.
+          #
+          # SDL2.dll is a runtime dependency of the engine — it is only copied
+          # next to the exe by `cmake --install`, which CI does not run, so
+          # ship it straight from the pinned SDL2 in the submodule. Without it
+          # the engine fails to start with "SDL2.dll was not found".
           path: |
             openjk/build/**/openjo_sp.x86_64.exe
             openjk/build/**/jospgamex86_64.dll
             openjk/build/**/rdjosp-vanilla_x86_64.dll
+            openjk/lib/SDL2/bin/x64/SDL2.dll
           if-no-files-found: error
