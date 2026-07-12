@@ -92,6 +92,29 @@ You do not have to use a preset. Two other options cover everything:
 `r_mode`, `r_customwidth`, and `r_customheight` are latched — run `vid_restart`
 or restart after changing them.
 
+### Choosing a mode from the in-game menu (optional)
+
+The engine knows all the modes above, but the Single-Player **SETUP → VIDEO →
+"Video Mode"** field is driven by two menu files inside your retail
+`assets1.pk3`, and stock Raven builds only list resolutions up to 2048×1536.
+So by default the new 16:9/21:9/24:10/32:9 presets are reachable from the
+console (`r_mode 17`) but not from that menu dropdown.
+
+`tools/build-widescreen-menu-pk3.sh` adds them to the menu. Like the texture
+upscaler, it reads the menu files from **your own** copy of the game, appends the
+extra resolution entries, and writes an override pak — it ships none of Raven's
+files and never modifies your retail data:
+
+```sh
+tools/build-widescreen-menu-pk3.sh
+# writes zz-widescreen-menu.pk3 into your base/; remove that one file to undo.
+```
+
+After it runs, the "Video Mode" field lists 1280×720 through 5120×1440 (32:9);
+selecting one and choosing **APPLY CHANGES** sets `r_mode` and restarts video.
+This is purely cosmetic menu plumbing — it does not change what the engine can
+render, only what the dropdown offers.
+
 ## Recommended setup
 
 For a fullscreen ultrawide (e.g. 3440×1440) experience:
