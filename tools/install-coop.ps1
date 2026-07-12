@@ -42,11 +42,37 @@
 .PARAMETER StagingDir
     Where to install the co-op files. Defaults to %LOCALAPPDATA%\jk2coop.
 
+.PARAMETER WithWidescreen
+    Enable the widescreen / QHD / ultrawide / 4K video-menu mod (adds the modern
+    resolutions to SETUP > VIDEO > Video Mode). Built natively in PowerShell from
+    your own retail menu files; no retail data is modified.
+
+.PARAMETER WithTextures
+    Generate the AI material-texture pak. This needs an AMD ROCm GPU container,
+    which is a Linux-only setup; on Windows the installer prints the command to
+    run on a suitable Linux machine rather than running it.
+
+.PARAMETER WithUpscale
+    Build the Real-ESRGAN hi-res texture override. Also a Linux GPU-only mod;
+    offered here as a printed command.
+
+.PARAMETER All
+    Enable every optional mod above.
+
+.PARAMETER NoOptional
+    Skip all optional-mod prompts (core install only).
+
+.PARAMETER Yes
+    Assume "yes" to any optional-mod prompt that would otherwise be shown.
+
 .PARAMETER Uninstall
     Remove everything this installer created and exit.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -All
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 `
@@ -60,6 +86,12 @@ param(
     [string]$GameData,
     [string]$Binaries,
     [string]$StagingDir = (Join-Path $env:LOCALAPPDATA 'jk2coop'),
+    [switch]$WithWidescreen,
+    [switch]$WithTextures,
+    [switch]$WithUpscale,
+    [switch]$All,
+    [switch]$NoOptional,
+    [switch]$Yes,
     [switch]$Uninstall
 )
 
@@ -85,6 +117,12 @@ $DefaultMap  = 'kejim_post'
 
 $RepoRoot  = Split-Path -Parent $PSScriptRoot          # tools\ -> repo root
 $Manifest  = Join-Path $StagingDir '.coop-install-manifest'
+
+# The stock SP video-mode resolution list ends at 2048x1536 (mode 10). The
+# widescreen mod appends the Track-G engine modes (13-21). Match exactly, and
+# skip if the line is not in the stock form (already patched / different edition).
+$WsTail = '@MENUS1_2048_X_1536 10 }'
+$WsAdd  = '@MENUS1_2048_X_1536 10  "1280 X 720 (16:9)" 13  "1600 X 900 (16:9)" 14  "1920 X 1080 (16:9)" 15  "2560 X 1080 (21:9)" 16  "2560 X 1440 QHD" 17  "3440 X 1440 (21:9)" 18  "3840 X 1600 (24:10)" 19  "3840 X 2160 4K" 20  "5120 X 1440 (32:9)" 21 }'
 
 # --- Helpers ---------------------------------------------------------------
 
@@ -143,6 +181,135 @@ function Install-VcRedist {
         Info "warning: could not install the Visual C++ redistributable automatically ($($_.Exception.Message))."
         Info "         Download it from $VcRedistUrl and install it if the engine will not start."
     }
+}
+
+# --- Optional mods ---------------------------------------------------------
+
+# True if we can prompt the user (interactive host with a real console).
+function Test-Interactive {
+    try { return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected }
+    catch { return $false }
+}
+
+# Ask a yes/no question (default No). -Yes auto-confirms a prompt that would
+# otherwise be shown; it does NOT turn an un-prompted question into a yes.
+function Confirm-Mod ([string]$prompt) {
+    if (-not (Test-Interactive)) { return $false }
+    if ($Yes) { Say "  $prompt [y/N] y (-Yes)"; return $true }
+    $reply = Read-Host "  $prompt [y/N]"
+    return ($reply -match '^(y|yes)$')
+}
+
+# Resolve a mod decision: an explicit flag ($true) forces yes; -All forces yes;
+# -NoOptional forces no; otherwise prompt (interactive) or default no.
+function Resolve-Mod ([bool]$flag, [string]$prompt) {
+    if ($NoOptional) { return $false }
+    if ($flag -or $All) { return $true }
+    return (Confirm-Mod $prompt)
+}
+
+# Build the widescreen video-menu override pak natively (no bash dependency).
+# Reads the two SP menu files from the user's own retail assets1.pk3, appends the
+# widescreen resolution entries to the single Video Mode list line, and writes a
+# zz-widescreen-menu.pk3. Returns $true on success. Retail data is untouched.
+function Build-WidescreenPak ([string]$gameData, [string]$outPk3) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+
+    # Locate the retail pak that carries the SP video menu (has ui_r_mode).
+    $srcPak = $null
+    foreach ($p in (Get-ChildItem -LiteralPath (Join-Path $gameData 'base') -Filter 'assets*.pk3' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        try {
+            $z = [System.IO.Compression.ZipFile]::OpenRead($p.FullName)
+            try {
+                $e = $z.Entries | Where-Object { $_.FullName -eq 'ui/ingamesetup.menu' } | Select-Object -First 1
+                if ($e) {
+                    $sr = New-Object System.IO.StreamReader($e.Open())
+                    $txt = $sr.ReadToEnd(); $sr.Close()
+                    if ($txt -match 'ui_r_mode') { $srcPak = $p.FullName }
+                }
+            } finally { $z.Dispose() }
+        } catch { }
+        if ($srcPak) { break }
+    }
+    if (-not $srcPak) { Info 'widescreen: no assets*.pk3 with the SP video menu found; skipped.'; return $false }
+
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ("jk2-ws-" + [System.IO.Path]::GetRandomFileName())
+    $uiDir = Join-Path $work 'ui'
+    New-Item -ItemType Directory -Force -Path $uiDir | Out-Null
+    try {
+        $patched = 0
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($srcPak)
+        try {
+            foreach ($name in @('ingamesetup.menu', 'setup.menu')) {
+                $entry = $zip.Entries | Where-Object { $_.FullName -eq "ui/$name" } | Select-Object -First 1
+                if (-not $entry) { continue }
+                # Read as latin-1 (ISO-8859) bytes->string to preserve the file exactly.
+                $ms = New-Object System.IO.MemoryStream
+                $es = $entry.Open(); $es.CopyTo($ms); $es.Close()
+                $enc = [System.Text.Encoding]::GetEncoding('iso-8859-1')
+                $content = $enc.GetString($ms.ToArray())
+                $count = ([regex]::Matches($content, [regex]::Escape($WsTail))).Count
+                if ($count -ne 1) {
+                    Info "widescreen: $name resolution list not in the expected stock form; skipped."
+                    continue
+                }
+                $content = $content.Replace($WsTail, $WsAdd)
+                [System.IO.File]::WriteAllBytes((Join-Path $uiDir $name), $enc.GetBytes($content))
+                $patched++
+            }
+        } finally { $zip.Dispose() }
+
+        if ($patched -lt 1) { Info 'widescreen: no menu files could be patched.'; return $false }
+
+        if (Test-Path -LiteralPath $outPk3) { Remove-Item -LiteralPath $outPk3 -Force }
+        # Zip the ui\ tree into the pak.
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($work, $outPk3)
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Run the optional-mod stage after the core install.
+function Invoke-OptionalMods ([string]$gameData, [string]$baseDir) {
+    $any = $false
+
+    # Widescreen / QHD / ultrawide (native; no GPU needed).
+    if (Resolve-Mod ([bool]$WithWidescreen) 'Add widescreen / QHD / ultrawide / 4K resolutions to the video menu?') {
+        $any = $true
+        $wsPak = Join-Path $baseDir 'zz-widescreen-menu.pk3'
+        Say 'Enabling widescreen video-menu modes...'
+        try {
+            if (Build-WidescreenPak $gameData $wsPak) {
+                Manifest-Add $wsPak
+                Info 'installed zz-widescreen-menu.pk3 (SETUP > VIDEO > Video Mode)'
+            } else {
+                Info 'widescreen mod was not applied.'
+            }
+        } catch {
+            Info "widescreen build failed ($($_.Exception.Message))."
+        }
+    }
+
+    # AI-generated textures (Linux GPU-only).
+    if (Resolve-Mod ([bool]$WithTextures) 'Generate original AI material textures? (needs a Linux GPU + container)') {
+        $any = $true
+        Info 'AI texture generation needs an AMD ROCm GPU container, which is a Linux-only setup.'
+        Info 'run it on a suitable Linux machine, then copy the resulting pak into base\:'
+        Info '    tools/generate-textures.sh --out zzz-generated-textures.pk3'
+        Info '(see docs/asset-generation.md)'
+    }
+
+    # Real-ESRGAN upscale (Linux GPU-only).
+    if (Resolve-Mod ([bool]$WithUpscale) 'Build a Real-ESRGAN hi-res texture override? (needs a Linux GPU + container)') {
+        $any = $true
+        Info 'Real-ESRGAN upscaling needs an AMD ROCm GPU container, which is a Linux-only setup.'
+        Info 'run it on a suitable Linux machine, then copy the resulting pak into base\:'
+        Info "    tools/upscale-textures.sh --assets `"$gameData\base`" --out zzz-hires-textures.pk3"
+        Info '(see docs/hires-textures.md)'
+    }
+
+    if (-not $any) { Info 'no optional mods selected.' }
 }
 
 # --- GameData autodetection ------------------------------------------------
@@ -391,6 +558,11 @@ echo %HOST% | find ":" >nul || set "HOST=%HOST%:$DefaultPort"
     Set-Content -LiteralPath $joinCmd -Value $joinBody -Encoding ASCII
     Manifest-Add $joinCmd
     Info 'jk2coop-join.cmd'
+
+    # Optional game-file mods (widescreen; textures/upscale are Linux GPU-only).
+    Say ''
+    Say 'Optional mods:'
+    Invoke-OptionalMods $GameData $baseDir
 
     Say ''
     Say 'Installed. Try:'
