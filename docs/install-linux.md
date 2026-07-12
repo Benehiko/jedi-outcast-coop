@@ -65,10 +65,36 @@ The installer:
   (e.g. a NAS mount). It is validated by the presence of `base/assets0.pk3`;
 - stages `~/.local/share/openjo/base/` with **symlinks** to your retail
   `assets*.pk3`, the built co-op gamecode, and the Co-op UI overlay;
-- installs two launchers into `~/.local/bin/`.
+- installs two launchers into `~/.local/bin/`;
+- offers the **optional mods** below.
 
 It is idempotent (safe to re-run), and `--uninstall` removes exactly what it
 created (tracked in a manifest). **Retail files are never touched.**
+
+### Optional mods
+
+After the core install, the script offers optional game-file mods. Each just
+adds a `zz…` override pak to your `base/` (retail data is never modified, and
+`--uninstall` removes them too). On an interactive terminal it prompts **y/N**
+for each; run non-interactively (piped, CI) it enables none unless you pass the
+matching flag.
+
+| Mod | Flag | What it does | Needs |
+|---|---|---|---|
+| Widescreen menu | `--with-widescreen` | Adds QHD / ultrawide / 4K resolutions to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | — |
+| Generated textures | `--with-textures` | Original AI material textures via FLUX (see [asset-generation.md](asset-generation.md)) | GPU + container |
+| Upscaled textures | `--with-upscale` | Real-ESRGAN hi-res override from your own retail art (see [hires-textures.md](hires-textures.md)) | GPU + container |
+
+```sh
+tools/install-coop.sh                       # prompts y/N for each optional mod
+tools/install-coop.sh --all                 # enable every optional mod
+tools/install-coop.sh --with-widescreen     # only the widescreen menu mod
+tools/install-coop.sh --no-optional         # core install only, no prompts
+```
+
+The GPU-heavy mods (textures, upscale) are run only if a container runtime
+(`nerdctl`/`podman`) and an AMD ROCm device (`/dev/kfd`) are present; otherwise
+the installer prints the exact command to run later on suitable hardware.
 
 If `~/.local/bin` is not on your `PATH`, either add it or call the launchers
 by their full path.
