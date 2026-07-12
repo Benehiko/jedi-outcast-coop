@@ -46,6 +46,12 @@ A new archived cvar restores the old behavior for anyone who wants it:
 The force-speed and timescale handling that already modulated turn speed
 is unchanged; only the FOV term was made opt-in.
 
+This is separate from the engine's base `sensitivity` cvar, which is the
+raw multiplier on mouse movement. Its stock default (`5`) is fast on a
+modern high-DPI mouse, so the installers set a calmer `0.5` in modern mode
+(tunable — see [Installer options](#installer-options)). You can change it
+any time with `sensitivity <n>` in the console.
+
 ### 2. Saber auto-aim off by default
 
 `g_saberAutoAim` now defaults to `0` (was `1`), so aim is free by
@@ -149,9 +155,15 @@ config that may have persisted the old values):
 | `--combat classic` | `-Combat classic` | Legacy auto-aim, dynamic crosshair, FOV-linked sensitivity |
 | `--skip-cutscenes` | `-SkipCutscenes` | Auto-skip scripted map-intro cutscenes |
 | `--no-skip-cutscenes` | `-NoSkipCutscenes` | Never auto-skip (suppress the prompt) |
+| `--sensitivity N` | `-Sensitivity N` | Base mouse sensitivity for modern mode (default `0.5`) |
 
 On an interactive run the cutscene-skip choice is prompted; combat mode
 defaults to modern unless `--combat classic` is passed.
+
+In modern mode the installers also write `seta sensitivity 0.5` (the JK2
+engine default is `5`, which is fast on a modern high-DPI mouse). Pass
+`--sensitivity N` / `-Sensitivity N` to choose another value; `--combat
+classic` leaves your existing sensitivity untouched.
 
 ## Reverting to classic feel
 

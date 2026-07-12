@@ -45,6 +45,8 @@
 #                     Written to base/autoexec_sp.cfg so it overrides stale configs.
 #   --skip-cutscenes  Auto-skip scripted map-intro cutscenes (off by default).
 #   --no-skip-cutscenes  Never auto-skip cutscenes (suppress the prompt).
+#   --sensitivity N   Base mouse sensitivity for modern mode (default 0.5; the
+#                     JK2 engine default is 5). Ignored with --combat classic.
 #   --all             Enable every optional mod above.
 #   --no-optional     Skip all optional-mod prompts (core install only).
 #   --yes, -y         Assume "yes" to prompts that would otherwise be shown.
@@ -134,6 +136,9 @@ ASSUME_YES=0
 # disk can't override them, and lets the user pick the classic feel instead.
 COMBAT_MODE=modern
 OPT_SKIPCUTSCENES=ask
+# Base mouse sensitivity for modern combat (engine default is 5). Modern mode
+# only; classic leaves the engine/user value alone.
+MOUSE_SENSITIVITY=0.5
 
 is_interactive() { [[ -t 0 ]]; }
 
@@ -277,6 +282,7 @@ write_combat_config() {
         echo "seta cg_dynamicCrosshair \"$xhair\""
         echo "seta cg_fovSensitivityScale \"$sens\""
         echo "seta g_skipIntroCinematics \"$skip\""
+        [[ "$COMBAT_MODE" == modern ]] && echo "seta sensitivity \"$MOUSE_SENSITIVITY\""
     } > "$cfg"
     manifest_add "$cfg"
     info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
@@ -485,12 +491,14 @@ while [[ $# -gt 0 ]]; do
         --combat=*) COMBAT_MODE="${1#*=}"; shift ;;
         --skip-cutscenes)    OPT_SKIPCUTSCENES=yes; shift ;;
         --no-skip-cutscenes) OPT_SKIPCUTSCENES=no; shift ;;
+        --sensitivity) MOUSE_SENSITIVITY="${2:?--sensitivity needs a number}"; shift 2 ;;
+        --sensitivity=*) MOUSE_SENSITIVITY="${1#*=}"; shift ;;
         --all)             OPT_WIDESCREEN=yes; OPT_TEXTURES=yes; OPT_UPSCALE=yes; shift ;;
         --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; OPT_SKIPCUTSCENES=no; shift ;;
         --yes|-y)          ASSUME_YES=1; shift ;;
         --uninstall) ACTION=uninstall; shift ;;
         -h|--help)
-            sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,53p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -500,6 +508,9 @@ case "$COMBAT_MODE" in
     modern|classic) ;;
     *) die "--combat must be 'modern' or 'classic' (got: $COMBAT_MODE)" ;;
 esac
+
+[[ "$MOUSE_SENSITIVITY" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+    die "--sensitivity must be a non-negative number (got: $MOUSE_SENSITIVITY)"
 
 case "$ACTION" in
     install)   do_install "$GAMEDATA" ;;

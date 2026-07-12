@@ -68,6 +68,11 @@
 .PARAMETER NoSkipCutscenes
     Never auto-skip cutscenes (suppress the prompt).
 
+.PARAMETER Sensitivity
+    Base mouse sensitivity written in modern mode (default 0.5; the JK2 engine
+    default is 5, which is fast on a modern high-DPI mouse). Ignored with
+    -Combat classic.
+
 .PARAMETER All
     Enable every optional mod above.
 
@@ -105,6 +110,7 @@ param(
     [string]$Combat = 'modern',
     [switch]$SkipCutscenes,
     [switch]$NoSkipCutscenes,
+    [double]$Sensitivity = 0.5,
     [switch]$All,
     [switch]$NoOptional,
     [switch]$Yes,
@@ -314,6 +320,11 @@ function Write-CombatConfig ([string]$baseDir) {
         "seta cg_fovSensitivityScale `"$sens`""
         "seta g_skipIntroCinematics `"$skip`""
     )
+    if ($Combat -ne 'classic') {
+        # Invariant culture so a comma decimal locale can't write "0,5".
+        $sensStr = $Sensitivity.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $lines += "seta sensitivity `"$sensStr`""
+    }
     Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
     Manifest-Add $cfg
     Info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
