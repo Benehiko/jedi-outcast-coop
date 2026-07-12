@@ -75,6 +75,29 @@ touched.**
 If `~/bin` is not on your `PATH`, either add it or call the launchers by their
 full path.
 
+### Optional mods
+
+After the core install the script offers optional game-file mods, each of which
+just adds a `zz…` override pak to `base/` (retail data is never modified, and
+`--uninstall` removes them too). On an interactive terminal it prompts **y/N**
+for each; run non-interactively it enables none unless you pass the matching flag.
+
+| Mod | Flag | Availability |
+|---|---|---|
+| Widescreen menu | `--with-widescreen` | Works on macOS (needs `python3` — Xcode CLT or `brew install python`) — see [widescreen.md](widescreen.md) |
+| Generated textures | `--with-textures` | Linux GPU-only — the installer prints the command to run on a Linux machine |
+| Upscaled textures | `--with-upscale` | Linux GPU-only — prints the command |
+
+```sh
+tools/install-coop-macos.sh                    # prompts y/N per optional mod
+tools/install-coop-macos.sh --all              # enable everything offered
+tools/install-coop-macos.sh --with-widescreen  # only the widescreen menu
+tools/install-coop-macos.sh --no-optional      # core install only
+```
+
+The AI-texture mods need an AMD ROCm GPU container (Linux-only); on macOS they
+are offered but resolve to a printed command rather than run.
+
 > **Note:** the macOS installer's logic has been validated against a mock
 > build tree, but has not yet been exercised end-to-end on a real Mac. If you
 > hit a snag, please open an issue.

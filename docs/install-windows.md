@@ -93,6 +93,30 @@ Re-running is idempotent. To remove exactly what the installer created
 powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -Uninstall
 ```
 
+### Optional mods
+
+After the core install the script offers optional game-file mods, each of which
+just adds a `zz…` override pak to `base\` (retail data is never modified, and
+`-Uninstall` removes them too). On an interactive console it prompts **y/N** for
+each; run non-interactively it enables none unless you pass the matching switch.
+
+| Mod | Switch | What it does | Availability |
+|---|---|---|---|
+| Widescreen menu | `-WithWidescreen` | Adds QHD / ultrawide / 4K to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | Works on Windows (built natively in PowerShell from your own retail menus) |
+| Generated textures | `-WithTextures` | Original AI material textures ([asset-generation.md](asset-generation.md)) | Linux GPU-only — the installer prints the command to run on a Linux machine |
+| Upscaled textures | `-WithUpscale` | Real-ESRGAN hi-res override ([hires-textures.md](hires-textures.md)) | Linux GPU-only — prints the command |
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1                    # prompts y/N
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -All               # enable everything offered
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -WithWidescreen    # only the widescreen menu
+powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -NoOptional        # core install only
+```
+
+The AI-texture mods need an AMD ROCm GPU container, which is a Linux-only setup;
+on Windows they are offered but resolve to a printed command you can run on a
+Linux machine, then copy the resulting `zzz-*.pk3` into your `base\`.
+
 ## 3. Play
 
 The installer writes `jk2coop-host.cmd` and `jk2coop-join.cmd` next to the
