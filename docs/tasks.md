@@ -51,6 +51,14 @@ Legend: each task lists what it **needs** (dependencies), what to
   surfaced: disconnected joiner slots never left CS_ZOMBIE
   (`SV_CheckTimeouts` only examined slot 0), and rejected connects sat on
   a silent loading screen instead of showing the server's message.
+- **Track G** (display / resolution): G1 2D aspect correction
+  (`r_aspectCorrect2D`, default on — **0022**) so the HUD and menus keep
+  4:3 proportions instead of stretching, and G2 QHD/4K/ultrawide `r_mode`
+  presets (modes 13–21 — **0023**). Verified at 3440×1440 headless: the
+  2D layer pillarboxes (black side bars, undistorted menu) with the fix
+  on and stretches edge-to-edge with it off. Wide FOV via the engine's
+  existing `cg_fovAspectAdjust` is documented, not forced.
+  See [widescreen.md](widescreen.md).
 - GPLv2 `LICENSE` at root, per-OS install guides
   (`docs/install-*.md`), and README license/trademark sections.
 
@@ -477,6 +485,43 @@ task. Every task keeps the solo loopback regression green.
   3 bots.
   Done: harness green; a joiner window shows objectives + mission text
   through a full level, live.
+
+---
+
+## Track G — display / resolution (widescreen, QHD, ultrawide)
+
+Background: the stock engine caps `r_mode` at 2048×1536 and draws the whole
+2D layer (HUD, menus, masks) through a single hardcoded
+`glOrtho(0, 640, 480, 0, …)` that stretches the 4:3 canvas across the entire
+framebuffer. On 16:9 it is visibly stretched; on 21:9/32:9 it is severe. The
+3D view has a correct Hor+ FOV path already (`cg_fovAspectAdjust`), just off by
+default. User-facing guide: [widescreen.md](widescreen.md).
+
+- **G1 — 2D aspect correction** (**DONE**, patch **0022**). Add
+  `r_aspectCorrect2D` (archived, latched, default `1`). In `RB_SetGL2D`
+  (`code/rd-vanilla/tr_backend.cpp`), when the framebuffer is wider than 4:3,
+  set the viewport/scissor to a centred 4:3 sub-rectangle (pillarbox); when
+  taller, letterbox. `0` restores the legacy stretch. The 3D view is
+  unaffected (it renders under its own projection at the full viewport).
+  Done: at 3440×1440 the far-left/right HUD columns read black (mean ≈ 0) with
+  the fix on and lit (stretched content) with it off; menu proportions correct.
+
+- **G2 — high-res + wide `r_mode` presets** (**DONE**, patch **0023**). Extend
+  `r_vidModes[]` in `shared/sdl/sdl_window.cpp` with 1280×720, 1600×900,
+  1920×1080, 2560×1080, 2560×1440 (QHD), 3440×1440, 3840×1600, 3840×2160 (4K),
+  and 5120×1440 (modes 13–21). `r_mode -1` (custom w/h) and `r_mode -2`
+  (desktop) already worked and are documented as the other paths.
+
+- **G3 — wide FOV: document, do not force** (**DONE**, docs only). The engine's
+  `cg_fovAspectAdjust` gives the correct Hor+ scaling; it is archived and
+  user-set, and Hor+ vs vertical FOV is a preference, so [widescreen.md] tells
+  players to enable it rather than flipping the default (which would only
+  affect brand-new configs and override existing ones).
+
+Possible follow-ups (not started): an in-menu resolution/FOV control that lists
+the new modes and toggles `cg_fovAspectAdjust`; per-element 2D placement (draw
+backgrounds full-bleed while pillarboxing only the HUD) if full-screen 4:3
+menu art on ultrawide is judged worth the invasive per-call change.
 
 ---
 
