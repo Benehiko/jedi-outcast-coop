@@ -141,39 +141,69 @@ to finish a bf16 run:
 - The tool sets `TORCH_BLAS_PREFER_HIPBLASLT=0` by default because RDNA4's fused
   `hipBLASLt` path throws `HIPBLAS_STATUS_*` errors mid-generation.
 
-**The most reliable path on 16 GB is `GEN_FP8=1`** (built in): it quantizes the
-transformer + T5 text encoder to fp8 with `optimum-quanto`, roughly halving the
-transformer so it fits in `model` offload **without** the fault-prone sequential
-path. In testing on the RX 9070 this cleared the transformer denoise with no GPU
-fault. Combine with the default CPU fp32 VAE decode:
+**The working path on 16 GB RDNA4 is `GEN_FP8=1 GEN_FP8_TE=0`** — verified
+end-to-end on the RX 9070, producing a full 10-material pack of clean textures:
 
 ```sh
-GEN_FP8=1 GEN_VRAM_MODE=model tools/generate-textures.sh --size 512
+GEN_FP8=1 GEN_FP8_TE=0 GEN_VRAM_MODE=model GEN_VAE_FP32=1 \
+  HF_HUB_OFFLINE=1 tools/generate-textures.sh --size 512
 ```
+
+Two RDNA4-specific details make this work:
+
+- **`GEN_FP8_TE=0` (quantize the transformer only, leave the T5 text encoder in
+  bf16).** fp8 fits the transformer in 16 GB and clears the denoise with no GPU
+  fault. But quantizing the **T5 text encoder** to fp8 as well corrupts the prompt
+  conditioning: most prompts then render as **rainbow-static / confetti noise**
+  (a handful of prompts survive by luck, which makes it easy to miss). Leaving the
+  text encoder in bf16 — it still streams in under `model` offload — fixes the
+  artifacting completely. This is the single most important flag on this card. The
+  default is `GEN_FP8_TE=1` (quantize both, lowest VRAM) for other GPUs where fp8
+  T5 is fine; on gfx1201 you must set it to `0`.
+- **512² only.** 1024² OOMs during attention: after the fp8 model + activations
+  (~13.5 GB) the math-SDPA attention step needs ~1.9 GB and only ~1.8 GB is free.
+  Generate at `--size 512`; to go larger, upscale the 512² output afterwards with
+  `tools/upscale-textures.sh` (Real-ESRGAN) rather than pushing FLUX to 1024².
+
+Plain **bf16 without fp8 also OOMs** even in `model` offload at 512² on this card
+(a transformer submodule's `.to(device)` fails with the GPU already ~15.4 GB
+full), so the fp8 transformer is mandatory on 16 GB RDNA4 — you cannot fall back
+to bf16 here.
 
 Tuning knobs (all environment variables):
 
 | Var | Default | Purpose |
 |---|---|---|
-| `GEN_FP8` | `0` | `1` = fp8-quantize the transformer/T5 (fits 16 GB, avoids offload faults). |
+| `GEN_FP8` | `0` | `1` = fp8-quantize the transformer (fits 16 GB, avoids offload faults). |
+| `GEN_FP8_TE` | `1` | `0` = leave the T5 text encoder in bf16. **Required on gfx1201** to avoid confetti artifacting; `1` quantizes it too (less VRAM, fine on most other GPUs). |
+| `GEN_FP8_QTYPE` | `qfloat8` | quanto quant dtype: `qfloat8` / `qint8` / `qint4`. |
 | `GEN_VRAM_MODE` | `auto` | `full` / `model` / `sequential` placement (see table above). |
 | `GEN_VAE_FP32` | `1` | `1` = CPU fp32 VAE decode (fixes the gfx1201 black-image NaN). |
 | `GEN_DTYPE` | `bf16` | `bf16` / `fp16` / `fp32` compute dtype. |
 | `GEN_ATTN` | `math` | `math` = eager SDPA (safe); `auto` = torch default. |
+| `HF_HUB_OFFLINE` | *(unset)* | `1` = load the already-cached model from the local snapshot dir with **no HF token and no network** (also `GEN_OFFLINE=1`, or `GEN_MODEL_DIR` to point at a snapshot explicitly). |
 | `TORCH_BLAS_PREFER_HIPBLASLT` | `0` | `0` avoids RDNA4's flaky fused BLAS. |
 
-Other routes to a finished pack: a **≥24 GB** GPU (`full`, no offload), or
-`GEN_VRAM_MODE=sequential` on **non-RDNA4** hardware with ≥ ~28 GB free host RAM.
+**Offline / no-token runs:** once the weights are cached (first run, or any prior
+run), set `HF_HUB_OFFLINE=1` and no Hugging Face token is needed at all — the tool
+loads the components directly from the local snapshot directory, which also
+sidesteps a `huggingface_hub` completeness check that otherwise rejects the cache
+because FLUX ships extra top-level files (`ae.safetensors`, `flux1-schnell.safetensors`)
+the diffusers pipeline never uses.
+
+Other routes to a finished pack: a **≥24 GB** GPU (`full`, no offload, no fp8
+needed), or `GEN_VRAM_MODE=sequential` on **non-RDNA4** hardware with ≥ ~28 GB free
+host RAM.
 
 RDNA4 needs ROCm ≥ 7.2 either way. On NVIDIA, use `--cuda` with the NVIDIA
 container toolkit; a 16 GB+ NVIDIA card runs `model` offload comfortably and
 24 GB runs `full`.
 
-> **Status on 16 GB RDNA4:** as of this writing the fp8 path clears the
-> transformer without faulting but a full end-to-end pack had not yet been
-> produced on the 16 GB RX 9070 test card (generation was stopped to avoid
-> further GPU faults destabilising the desktop). fp8 is the recommended path;
-> a ≥24 GB or NVIDIA card is the sure one.
+> **Status on 16 GB RDNA4:** ✅ working. `GEN_FP8=1 GEN_FP8_TE=0` at `--size 512`
+> produces a full, clean end-to-end pack on the RX 9070 (gfx1201, ROCm 7.2). The
+> earlier confetti artifacting was caused by fp8-quantizing the T5 text encoder;
+> `GEN_FP8_TE=0` resolves it. A ≥24 GB or NVIDIA card remains the simplest path
+> (bf16, no fp8, and 1024² without the attention OOM).
 
 ## Usage
 

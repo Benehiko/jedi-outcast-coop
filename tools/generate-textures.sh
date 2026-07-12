@@ -52,13 +52,26 @@
 #   -h, --help       Show this help
 #
 # Environment:
-#   HF_TOKEN         Hugging Face access token. REQUIRED for the default model:
-#                    FLUX.1-schnell is Apache-2.0 but its HF repo is gated, so
-#                    the weight download needs a token (and a one-time license
-#                    acceptance on the model page) or it fails with HTTP 401.
-#                    It is passed into the container only; never logged or baked
-#                    into the image. Model weights cache under --model-dir and
-#                    are reused across runs (not deleted).
+#   HF_TOKEN         Hugging Face access token. Needed the FIRST time only:
+#                    FLUX.1-schnell is Apache-2.0 but its HF repo is gated, so the
+#                    initial weight download needs a token (and a one-time license
+#                    acceptance on the model page) or it fails with HTTP 401. It is
+#                    passed into the container only; never logged or baked into the
+#                    image. Weights cache under --model-dir and are reused.
+#   HF_HUB_OFFLINE   Set to 1 to load the ALREADY-CACHED model with NO token and NO
+#                    network (loads straight from the local snapshot dir). Use this
+#                    for every run after the weights are downloaded once.
+#
+# GPU tuning (see docs/asset-generation.md for the full table and rationale):
+#   GEN_FP8=1        fp8-quantize the transformer so it fits a 16 GB GPU.
+#   GEN_FP8_TE=0     Leave the T5 text encoder in bf16. REQUIRED on 16 GB RDNA4
+#                    (gfx1201) — quantizing T5 to fp8 corrupts conditioning and
+#                    most prompts come out as confetti noise. Default 1.
+#   GEN_VRAM_MODE    full | model | sequential placement (default auto).
+#   GEN_VAE_FP32=1   CPU fp32 VAE decode (default; fixes gfx1201 black-image NaN).
+#   On 16 GB RDNA4 the verified recipe is:
+#     GEN_FP8=1 GEN_FP8_TE=0 GEN_VRAM_MODE=model HF_HUB_OFFLINE=1 ... --size 512
+#   (512² only — 1024² OOMs at attention; upscale afterwards if you need more.)
 #
 # See docs/asset-generation.md for the licensing analysis, model notes, the
 # token workflow, prompt guidance, and how to keep additions non-infringing.
@@ -114,7 +127,7 @@ while [[ $# -gt 0 ]]; do
     --runtime)   RUNTIME="$2"; shift 2;;
     --keep-work) KEEP_WORK=1; shift;;
     --dry-run)   DRY_RUN=1; shift;;
-    -h|--help)   sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+    -h|--help)   sed -n '2,77p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) die "unknown option: $1 (try --help)";;
   esac
 done
@@ -228,7 +241,36 @@ if device == "cpu":
 dtype_name = os.environ.get("GEN_DTYPE", "bf16")
 dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}.get(dtype_name, torch.bfloat16)
 print(f">>> dtype: {dtype_name} ({dtype})", flush=True)
-pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=dtype, cache_dir="/models/hf")
+
+# When HF_HUB_OFFLINE=1 (or GEN_OFFLINE=1), resolve purely from the local cache
+# with NO token and NO network. `local_files_only=True` alone is not enough here:
+# huggingface_hub's snapshot_download runs a strict completeness check against the
+# repo's full file list, and FLUX.1-schnell ships extra top-level files the
+# diffusers pipeline never needs (ae.safetensors, flux1-schnell.safetensors,
+# README, .gitattributes). If those were skipped at download time the cached
+# snapshot is "incomplete" and the load raises IncompleteSnapshotError. So in
+# offline mode we point from_pretrained straight at the local snapshot DIRECTORY:
+# a real dir path loads the diffusers components in place and skips the repo
+# completeness check entirely. We locate it by finding model_index.json under the
+# HF cache. Set GEN_MODEL_DIR to override.
+OFFLINE = os.environ.get("HF_HUB_OFFLINE", "0") == "1" or os.environ.get("GEN_OFFLINE", "0") == "1"
+MODEL_REF = "black-forest-labs/FLUX.1-schnell"
+if OFFLINE:
+    import glob
+    snap = os.environ.get("GEN_MODEL_DIR", "")
+    if not snap:
+        hits = sorted(glob.glob(
+            "/models/hf/models--black-forest-labs--FLUX.1-schnell/snapshots/*/model_index.json"))
+        if not hits:
+            print("!!! offline: no local FLUX snapshot found under /models/hf", file=sys.stderr, flush=True)
+            sys.exit(5)
+        snap = os.path.dirname(hits[-1])
+    MODEL_REF = snap
+    print(f">>> offline: loading from local snapshot dir {MODEL_REF}", flush=True)
+pipe = FluxPipeline.from_pretrained(
+    MODEL_REF, torch_dtype=dtype, cache_dir="/models/hf",
+    local_files_only=OFFLINE,
+)
 
 # fp8 path (GEN_FP8=1): quantize the transformer (and text encoder) weights to
 # fp8 with optimum-quanto. This roughly halves the transformer (~12 GB bf16 ->
@@ -237,12 +279,28 @@ pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dt
 # touches the GPU.
 if os.environ.get("GEN_FP8", "0") == "1":
     try:
-        from optimum.quanto import freeze, qfloat8, quantize
-        print(">>> fp8: quantizing transformer + text_encoder_2 (optimum-quanto qfloat8)...", flush=True)
-        quantize(pipe.transformer, weights=qfloat8)
+        from optimum.quanto import freeze, quantize
+        import optimum.quanto as _q
+        # GEN_FP8_QTYPE selects the quantization dtype: qfloat8 (default),
+        # qint8, qint4. qfloat8 preserves dynamic range better for diffusion;
+        # if it produces confetti/noise on this GPU, qint8 is worth a try.
+        qname = os.environ.get("GEN_FP8_QTYPE", "qfloat8")
+        qtype = getattr(_q, qname, None)
+        if qtype is None:
+            print(f"!!! unknown GEN_FP8_QTYPE={qname}; falling back to qfloat8", file=sys.stderr, flush=True)
+            qtype = _q.qfloat8
+        # GEN_FP8_TE=1 (default) also quantizes text_encoder_2 (T5-XXL, ~9 GB) to
+        # halve its footprint. GEN_FP8_TE=0 leaves it in the pipeline dtype: this
+        # isolates whether quantizing the text encoder is corrupting the prompt
+        # conditioning (which would scramble most prompts into noise) vs the
+        # transformer being the culprit. Skipping it costs VRAM but model offload
+        # still streams it.
+        quant_te = os.environ.get("GEN_FP8_TE", "1") == "1"
+        print(f">>> fp8: quantizing transformer{' + text_encoder_2' if quant_te else ' only (TE left in {})'.format(dtype_name)} ({qname})...", flush=True)
+        quantize(pipe.transformer, weights=qtype)
         freeze(pipe.transformer)
-        if getattr(pipe, "text_encoder_2", None) is not None:
-            quantize(pipe.text_encoder_2, weights=qfloat8)
+        if quant_te and getattr(pipe, "text_encoder_2", None) is not None:
+            quantize(pipe.text_encoder_2, weights=qtype)
             freeze(pipe.text_encoder_2)
         print(">>> fp8: quantization complete", flush=True)
     except Exception as e:
@@ -271,8 +329,9 @@ _cpu_vae = None
 if VAE_CPU_FP32:
     from diffusers import AutoencoderKL
     _cpu_vae = AutoencoderKL.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell", subfolder="vae",
+        MODEL_REF, subfolder="vae",
         torch_dtype=torch.float32, cache_dir="/models/hf",
+        local_files_only=OFFLINE,
     ).to("cpu").eval()
 
 def decode_latents_cpu(latents):
@@ -389,6 +448,9 @@ set +e
   -e GEN_ATTN="${GEN_ATTN:-math}" \
   -e GEN_VAE_FP32="${GEN_VAE_FP32:-1}" \
   -e GEN_FP8="${GEN_FP8:-0}" \
+  -e GEN_FP8_TE="${GEN_FP8_TE:-1}" \
+  -e GEN_FP8_QTYPE="${GEN_FP8_QTYPE:-qfloat8}" \
+  ${HF_HUB_OFFLINE:+-e HF_HUB_OFFLINE="$HF_HUB_OFFLINE"} \
   -e PYTORCH_HIP_ALLOC_CONF="expandable_segments:True" \
   -e PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True" \
   -e TORCH_BLAS_PREFER_HIPBLASLT="${TORCH_BLAS_PREFER_HIPBLASLT:-0}" \
