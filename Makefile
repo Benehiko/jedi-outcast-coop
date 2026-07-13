@@ -17,7 +17,7 @@ LDFLAGS     := -s -w \
   -X $(VERSION_PKG).commit=$(COMMIT) \
   -X $(VERSION_PKG).date=$(DATE)
 
-.PHONY: all build install clean lint fmt test hooks
+.PHONY: all build install clean lint fmt test e2e hooks
 
 all: build
 
@@ -41,6 +41,12 @@ fmt:
 
 test:
 	$(GO) test $(GOFLAGS) -race ./...
+
+# End-to-end tests that drive the built binary against the real repo (needs the
+# OpenJK submodule checked out and git on PATH). Builds jk2coop first and passes
+# it to the tests via JK2COOP_BIN so they don't each rebuild it.
+e2e: build
+	JK2COOP_BIN=$(CURDIR)/$(BINARY) $(GO) test $(GOFLAGS) -tags e2e -v ./e2e/...
 
 # Enable the tracked git hooks (pre-commit lint + build) for this clone.
 hooks:

@@ -94,13 +94,29 @@ Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 make hooks   # enable the pre-commit hook (format check + lint + build) for this clone
 make fmt     # apply gofumpt + goimports
 make lint    # format check + golangci-lint (mirrors CI)
-make test    # go test -race ./...
+make test    # go test -race ./... (unit tests)
+make e2e     # end-to-end tests (needs the OpenJK submodule + git)
 ```
 
-CI runs the same checks in `.github/workflows/go.yml`, plus a cross-compile of
-the darwin/windows targets. Tagged `v*` pushes trigger
-`.github/workflows/release.yml`, which builds every platform and attaches the
-archives to a GitHub Release.
+### End-to-end tests
+
+`e2e/` (gated behind the `e2e` build tag) drives the built binary against the
+real repository rather than mocks. `make e2e` builds `jk2coop` and runs:
+
+- **`TestPatchesApplyToPristineSubmodule`** — resets the OpenJK submodule to
+  pristine, runs `jk2coop patches apply`, and asserts every `patches/*.patch`
+  is reported `applied` (none skipped) and the submodule tree actually changed.
+- **`TestPatchesApplyNotIdempotentOnDirtyTree`** — applies once, then asserts a
+  second apply on the now-patched tree fails with the reset guidance (the
+  patches overlap and are cumulative, so double-applying must error).
+
+Both reset the submodule on cleanup, so the working copy is never left dirty.
+
+CI runs the unit checks in the `go` job of `.github/workflows/go.yml` (lint,
+format, host build, darwin/windows cross-compile, race tests) and the e2e tests
+in a separate `e2e` job that checks out the submodule. Tagged `v*` pushes
+trigger `.github/workflows/release.yml`, which builds every platform and
+attaches the archives to a GitHub Release.
 
 ## Design notes
 

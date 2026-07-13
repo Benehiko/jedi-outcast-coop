@@ -1,8 +1,9 @@
 name: go
 
 # Lint, build (all target platforms), and test the jk2coop tooling binary that
-# replaces the tools/*.sh scripts. Runs on the host toolchain — no game data or
-# OpenJK submodule is needed, so this is fast and always green.
+# replaces the tools/*.sh scripts. The `go` job runs on the host toolchain with
+# no game data or submodule; the `e2e` job additionally checks out the OpenJK
+# submodule and drives the built binary (jk2coop patches apply) against it.
 
 on:
   push:
@@ -51,3 +52,21 @@ jobs:
 
       - name: Test (race)
         run: go test -mod=vendor -race ./...
+
+  e2e:
+    name: e2e (patches apply via jk2coop)
+    runs-on: ubuntu-latest
+    steps:
+      # The e2e tests drive the built binary against the OpenJK submodule, so it
+      # must be checked out. They reset the submodule around each run.
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: true
+
+      - name: Run e2e tests
+        run: make e2e
