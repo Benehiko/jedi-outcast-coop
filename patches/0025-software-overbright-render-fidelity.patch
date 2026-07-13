@@ -1,0 +1,78 @@
+diff --git a/code/rd-vanilla/tr_image.cpp b/code/rd-vanilla/tr_image.cpp
+index a13badd4..ebdb578e 100644
+--- a/code/rd-vanilla/tr_image.cpp
++++ b/code/rd-vanilla/tr_image.cpp
+@@ -1408,14 +1408,25 @@ void R_SetColorMappings( void ) {
+ 
+ 	// setup the overbright lighting
+ 	tr.overbrightBits = r_overBrightBits->integer;
+-	if ( !glConfig.deviceSupportsGamma ) {
+-		tr.overbrightBits = 0;		// need hardware gamma for overbright
+-	}
+ 
+-	// never overbright in windowed mode
+-	if ( !glConfig.isFullscreen )
++	// coop render fidelity: with r_overBrightBitsSoftware, keep overbright even
++	// when we have no hardware gamma ramp or are windowed. The overbright <<
++	// shift is baked into s_gammatable below and applied to textures/lightmaps at
++	// upload time by R_LightScaleTexture's no-hardware-gamma path, so the punch
++	// survives without touching the display gamma ramp. Without this flag we fall
++	// back to the classic behaviour: overbright needs a hardware gamma ramp and a
++	// fullscreen surface, or it's forced off (flat, dark lighting on Wayland etc).
++	if ( !r_overBrightBitsSoftware->integer )
+ 	{
+-		tr.overbrightBits = 0;
++		if ( !glConfig.deviceSupportsGamma ) {
++			tr.overbrightBits = 0;		// need hardware gamma for overbright
++		}
++
++		// never overbright in windowed mode
++		if ( !glConfig.isFullscreen )
++		{
++			tr.overbrightBits = 0;
++		}
+ 	}
+ 
+ 	if ( tr.overbrightBits > 1 ) {
+diff --git a/code/rd-vanilla/tr_init.cpp b/code/rd-vanilla/tr_init.cpp
+index 01f67409..e2fc44b5 100644
+--- a/code/rd-vanilla/tr_init.cpp
++++ b/code/rd-vanilla/tr_init.cpp
+@@ -137,6 +137,7 @@ cvar_t	*r_subdivisions;
+ cvar_t	*r_lodCurveError;
+ 
+ cvar_t	*r_overBrightBits;
++cvar_t	*r_overBrightBitsSoftware;
+ cvar_t	*r_mapOverBrightBits;
+ 
+ cvar_t	*r_debugSurface;
+@@ -1539,6 +1540,17 @@ void R_Register( void )
+ 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_texturebitslm = ri.Cvar_Get( "r_texturebitslm", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
++	// coop render fidelity: allow overbright without a hardware gamma ramp.
++	// The classic path (below, in R_SetColorMappings) forces overbright off
++	// whenever the OS can't hand us a hardware gamma ramp (Wayland, most
++	// compositors) or we're windowed/borderless -- which is the common case on
++	// modern setups, leaving world/model lighting flat and dark. When this is
++	// set, we keep overbright active and let the software gamma-table path
++	// (R_LightScaleTexture, which already bakes s_gammatable -- including the
++	// overbright << shift -- into textures and lightmaps at upload time when no
++	// hardware gamma exists) deliver the punch instead. Latched: textures are
++	// scaled at load, so it only takes effect on a vid_restart.
++	r_overBrightBitsSoftware = ri.Cvar_Get ("r_overBrightBitsSoftware", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "0", CVAR_ARCHIVE_ND|CVAR_LATCH );
+ 	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
+diff --git a/code/rd-vanilla/tr_local.h b/code/rd-vanilla/tr_local.h
+index ea07dfad..9b7d4e97 100644
+--- a/code/rd-vanilla/tr_local.h
++++ b/code/rd-vanilla/tr_local.h
+@@ -1205,6 +1205,7 @@ extern	cvar_t	*r_skipBackEnd;
+ extern	cvar_t	*r_ignoreGLErrors;
+ 
+ extern	cvar_t	*r_overBrightBits;
++extern	cvar_t	*r_overBrightBitsSoftware;
+ extern	cvar_t	*r_mapOverBrightBits;
+ 
+ extern	cvar_t	*r_debugSurface;

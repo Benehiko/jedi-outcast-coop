@@ -96,6 +96,23 @@ The GPU-heavy mods (textures, upscale) are run only if a container runtime
 (`nerdctl`/`podman`) and an AMD ROCm device (`/dev/kfd`) are present; otherwise
 the installer prints the exact command to run later on suitable hardware.
 
+### Combat and render presets
+
+Two config presets are written to `base/` (not opt-in mods — they default on,
+and are cvar-only, so `--uninstall` removes them):
+
+- `--combat modern|classic` (default `modern`) — modernized aim/crosshair/bolt
+  feel; see [modern-combat.md](modern-combat.md).
+- `--render high|classic` (default `high`) — sharper textures, anisotropic
+  filtering, and the software-overbright lighting fix that keeps world/model
+  lighting from going flat on Wayland/windowed; see
+  [render-fidelity.md](render-fidelity.md).
+
+```sh
+tools/install-coop.sh --render classic      # retail render defaults
+tools/install-coop.sh --combat classic      # retail combat feel
+```
+
 If `~/.local/bin` is not on your `PATH`, either add it or call the launchers
 by their full path.
 

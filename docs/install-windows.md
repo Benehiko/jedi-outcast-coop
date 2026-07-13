@@ -117,6 +117,17 @@ The AI-texture mods need an AMD ROCm GPU container, which is a Linux-only setup;
 on Windows they are offered but resolve to a printed command you can run on a
 Linux machine, then copy the resulting `zzz-*.pk3` into your `base\`.
 
+### Combat and render presets
+
+Two cvar-only presets are written to `base\` and default on (revertible;
+`-Uninstall` removes them):
+
+- `-Combat modern|classic` (default `modern`) — see
+  [modern-combat.md](modern-combat.md).
+- `-Render high|classic` (default `high`) — sharper textures, anisotropic
+  filtering, and the software-overbright lighting fix (matters in
+  windowed/borderless); see [render-fidelity.md](render-fidelity.md).
+
 ## 3. Play
 
 The installer writes `jk2coop-host.cmd` and `jk2coop-join.cmd` next to the

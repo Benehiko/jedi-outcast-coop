@@ -37,6 +37,11 @@
 #   --no-skip-cutscenes  Never auto-skip cutscenes (suppress the prompt).
 #   --sensitivity N   Base mouse sensitivity for modern mode (default 0.5; the
 #                     JK2 engine default is 5). Ignored with --combat classic.
+#   --render MODE     Render fidelity: 'high' (default; sharper textures, better
+#                     filtering, and the software-overbright lighting fix so the
+#                     world/models keep their punch on Wayland/windowed setups)
+#                     or 'classic' (retail engine defaults). Written to
+#                     base/autoexec_render.cfg. See docs/render-fidelity.md.
 #   --all             Enable every optional mod above.
 #   --no-optional     Skip all optional-mod prompts (core install only).
 #   --yes, -y         Assume "yes" to prompts (non-interactive; pairs with --all).
@@ -116,6 +121,16 @@ OPT_SKIPCUTSCENES=ask
 # which is fast on a modern high-DPI mouse; 0.5 is a calmer starting point.
 # Only written in modern mode (classic leaves the engine/user value alone).
 MOUSE_SENSITIVITY=0.5
+
+# Render fidelity preset. RENDER_QUALITY: high | classic.
+#   high    — sharper textures, better filtering, and the software-overbright
+#             fix so world/model lighting keeps its punch on Wayland / windowed
+#             setups (where the classic overbright path silently switches off).
+#             Costs a little VRAM/GPU; trivial on modern hardware.
+#   classic — leave every render cvar at the engine default (retail look).
+# Written to base/autoexec_render.cfg, exec'd from autoexec_sp.cfg. See
+# docs/render-fidelity.md.
+RENDER_QUALITY=high
 
 # True if we can prompt the user (stdin is a real terminal).
 is_interactive() { [[ -t 0 ]]; }
@@ -234,6 +249,67 @@ do_uninstall() {
 # Runs after the core install. For each mod, resolves the opt-in decision, and
 # if yes either builds+links the pak or (for GPU mods without a runtime) prints
 # the exact command to run later. All installed paks are manifest-tracked.
+# Write autoexec_render.cfg with the render-fidelity preset. Exec'd from
+# autoexec_sp.cfg (see write_combat_config). All cvars are CVAR_ARCHIVE, so this
+# only needs to run once, but re-running keeps the install self-describing and
+# lets --render classic revert to the retail look. Manifest-tracked.
+#
+# 'high' targets the "great in Blender, flat in-game" gap on modern setups:
+#   - r_overBrightBitsSoftware 1 + r_overBrightBits 1 + r_mapOverBrightBits 2:
+#     restore the lightmap overbright punch. The stock path forces overbright off
+#     without a hardware gamma ramp (Wayland, most compositors) or in a window;
+#     the software flag (added by patch 0025) keeps it via the texture-upload
+#     gamma table instead, so world/model lighting isn't flat. mapOverBright is 2
+#     (one above overBright) so R_ColorShiftLightingBytes still boosts the
+#     lightmaps by one step -- without that the overbright half-scale of textures
+#     just darkens the scene on the software path.
+#   - texture sharpness: full-res (r_picmip 0), uncompressed (no DXT banding),
+#     32-bit, 16x anisotropic, trilinear.
+#   - geometry: finer patch tessellation (r_subdivisions 1) and higher-detail
+#     model/curve LODs held further out.
+# These are latched render cvars, so they take effect on the next engine start
+# (the config is exec'd before the first map loads).
+write_render_config() {
+    local cfg="$BASE_DIR/autoexec_render.cfg"
+
+    {
+        echo "// Written by install-coop.sh — render fidelity preset ($RENDER_QUALITY)."
+        echo "// Delete this file (or run the installer with --render classic) to revert."
+        if [[ "$RENDER_QUALITY" == high ]]; then
+            # Lighting: restore overbright, working even without hardware gamma.
+            echo "seta r_overBrightBitsSoftware \"1\""
+            echo "seta r_overBrightBits \"1\""
+            echo "seta r_mapOverBrightBits \"2\""
+            # Texture fidelity.
+            echo "seta r_picmip \"0\""
+            echo "seta r_ext_compress_textures \"0\""
+            echo "seta r_texturebits \"32\""
+            echo "seta r_ext_texture_filter_anisotropic \"16\""
+            echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            # Geometry smoothness / LOD.
+            echo "seta r_subdivisions \"1\""
+            echo "seta r_lodbias \"-2\""
+            echo "seta r_lodscale \"20\""
+        else
+            # classic: pin the retail engine defaults so a prior 'high' install
+            # is fully reverted rather than left latched.
+            echo "seta r_overBrightBitsSoftware \"0\""
+            echo "seta r_overBrightBits \"0\""
+            echo "seta r_mapOverBrightBits \"0\""
+            echo "seta r_picmip \"0\""
+            echo "seta r_ext_compress_textures \"1\""
+            echo "seta r_texturebits \"0\""
+            echo "seta r_ext_texture_filter_anisotropic \"16\""
+            echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            echo "seta r_subdivisions \"4\""
+            echo "seta r_lodbias \"0\""
+            echo "seta r_lodscale \"10\""
+        fi
+    } > "$cfg"
+    manifest_add "$cfg"
+    info "wrote autoexec_render.cfg: render=$RENDER_QUALITY"
+}
+
 # Write autoexec_sp.cfg with the modern-combat cvars (or the classic feel), plus
 # the optional cutscene auto-skip. The engine execs autoexec_sp.cfg on startup,
 # after openjo_sp.cfg, so these values take effect even if an older config on
@@ -265,9 +341,14 @@ write_combat_config() {
         echo "seta cg_fovSensitivityScale \"$sens\""
         echo "seta g_skipIntroCinematics \"$skip\""
         [[ "$COMBAT_MODE" == modern ]] && echo "seta sensitivity \"$MOUSE_SENSITIVITY\""
+        # Chain the render-fidelity preset. The engine only auto-execs
+        # autoexec_sp.cfg, so render cvars live in their own file exec'd here.
+        echo "exec autoexec_render.cfg"
     } > "$cfg"
     manifest_add "$cfg"
     info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    write_render_config
 
     # In modern mode, rescale the CONTROLS mouse-sensitivity slider (retail min 2)
     # so the UI can reach and fine-tune the lower modern values. Builds a zz-
@@ -503,12 +584,14 @@ while [[ $# -gt 0 ]]; do
         --no-skip-cutscenes) OPT_SKIPCUTSCENES=no; shift ;;
         --sensitivity) MOUSE_SENSITIVITY="${2:?--sensitivity needs a number}"; shift 2 ;;
         --sensitivity=*) MOUSE_SENSITIVITY="${1#*=}"; shift ;;
+        --render) RENDER_QUALITY="${2:?--render needs high|classic}"; shift 2 ;;
+        --render=*) RENDER_QUALITY="${1#*=}"; shift ;;
         --all)             OPT_WIDESCREEN=yes; OPT_TEXTURES=yes; OPT_UPSCALE=yes; shift ;;
         --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; OPT_SKIPCUTSCENES=no; shift ;;
         --yes|-y)          ASSUME_YES=1; shift ;;
         --uninstall) ACTION=uninstall; shift ;;
         -h|--help)
-            sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -517,6 +600,11 @@ done
 case "$COMBAT_MODE" in
     modern|classic) ;;
     *) die "--combat must be 'modern' or 'classic' (got: $COMBAT_MODE)" ;;
+esac
+
+case "$RENDER_QUALITY" in
+    high|classic) ;;
+    *) die "--render must be 'high' or 'classic' (got: $RENDER_QUALITY)" ;;
 esac
 
 [[ "$MOUSE_SENSITIVITY" =~ ^[0-9]+([.][0-9]+)?$ ]] || \

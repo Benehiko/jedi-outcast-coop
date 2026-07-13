@@ -73,6 +73,12 @@
     default is 5, which is fast on a modern high-DPI mouse). Ignored with
     -Combat classic.
 
+.PARAMETER Render
+    Render fidelity: 'high' (default; sharper textures, better filtering, and the
+    software-overbright lighting fix so world/models keep their punch on
+    windowed/borderless setups) or 'classic' (retail engine defaults). Written to
+    base\autoexec_render.cfg. See docs/render-fidelity.md.
+
 .PARAMETER All
     Enable every optional mod above.
 
@@ -111,6 +117,8 @@ param(
     [switch]$SkipCutscenes,
     [switch]$NoSkipCutscenes,
     [double]$Sensitivity = 0.5,
+    [ValidateSet('high','classic')]
+    [string]$Render = 'high',
     [switch]$All,
     [switch]$NoOptional,
     [switch]$Yes,
@@ -370,6 +378,48 @@ function Build-SensitivityPak ([string]$baseDir, [string]$outPk3) {
     }
 }
 
+# Write autoexec_render.cfg with the render-fidelity preset (see install-coop.sh
+# for the full rationale). Exec'd from autoexec_sp.cfg. Manifest-tracked.
+function Write-RenderConfig ([string]$baseDir) {
+    $cfg = Join-Path $baseDir 'autoexec_render.cfg'
+    if ($Render -eq 'high') {
+        $lines = @(
+            "// Written by install-coop.ps1 - render fidelity preset ($Render)."
+            '// Delete this file (or re-run with -Render classic) to revert.'
+            'seta r_overBrightBitsSoftware "1"'
+            'seta r_overBrightBits "1"'
+            'seta r_mapOverBrightBits "2"'
+            'seta r_picmip "0"'
+            'seta r_ext_compress_textures "0"'
+            'seta r_texturebits "32"'
+            'seta r_ext_texture_filter_anisotropic "16"'
+            'seta r_textureMode "GL_LINEAR_MIPMAP_LINEAR"'
+            'seta r_subdivisions "1"'
+            'seta r_lodbias "-2"'
+            'seta r_lodscale "20"'
+        )
+    } else {
+        $lines = @(
+            "// Written by install-coop.ps1 - render fidelity preset ($Render)."
+            '// Delete this file (or re-run with -Render classic) to revert.'
+            'seta r_overBrightBitsSoftware "0"'
+            'seta r_overBrightBits "0"'
+            'seta r_mapOverBrightBits "0"'
+            'seta r_picmip "0"'
+            'seta r_ext_compress_textures "1"'
+            'seta r_texturebits "0"'
+            'seta r_ext_texture_filter_anisotropic "16"'
+            'seta r_textureMode "GL_LINEAR_MIPMAP_LINEAR"'
+            'seta r_subdivisions "4"'
+            'seta r_lodbias "0"'
+            'seta r_lodscale "10"'
+        )
+    }
+    Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
+    Manifest-Add $cfg
+    Info "wrote autoexec_render.cfg: render=$Render"
+}
+
 # Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
 # cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
 # openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
@@ -403,9 +453,13 @@ function Write-CombatConfig ([string]$baseDir) {
         $sensStr = $Sensitivity.ToString([System.Globalization.CultureInfo]::InvariantCulture)
         $lines += "seta sensitivity `"$sensStr`""
     }
+    # Chain the render-fidelity preset (only autoexec_sp.cfg is auto-exec'd).
+    $lines += 'exec autoexec_render.cfg'
     Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
     Manifest-Add $cfg
     Info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    Write-RenderConfig $baseDir
 
     # In modern mode, rescale the CONTROLS mouse-sensitivity slider (retail min 2)
     # so the UI can reach the lower modern values.

@@ -32,6 +32,15 @@ the installers can write your choice (`--combat modern|classic`,
 `--skip-cutscenes`) — see
 [docs/modern-combat.md](docs/modern-combat.md).
 
+Rendering fidelity is improved too. JK2's models are high-fidelity in
+Blender but read as flat and dark in-game, largely because the classic
+overbright lighting silently switches off on Wayland and in windowed mode.
+An engine fix restores it there (software overbright), and the installers
+default to a `--render high` preset — sharper, uncompressed textures,
+anisotropic filtering, and restored lighting punch — revertible with
+`--render classic`. See
+[docs/render-fidelity.md](docs/render-fidelity.md).
+
 In progress: syncing the campaign UI — objectives, mission text,
 cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).
 Current task status: [docs/tasks.md](docs/tasks.md).
@@ -163,6 +172,7 @@ See `jk2coop completion <shell> --help` for per-shell details.
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
 | [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
 | [modern-combat.md](docs/modern-combat.md) | Modernized combat feel: FOV-independent aim, fixed screen-center crosshair, saber auto-aim off by default, faster blaster bolts (all cvar/opt-in) |
+| [render-fidelity.md](docs/render-fidelity.md) | Why models look flat in-game vs Blender, the software-overbright lighting fix, and the `--render high` texture/filtering/LOD preset |
 | [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [asset-formats.md](docs/asset-formats.md) | Reference: the game's file formats (`.pk3`, `.md3`, `.glm`/`.gla`, `.bsp`, …) and how to open them in Blender |
