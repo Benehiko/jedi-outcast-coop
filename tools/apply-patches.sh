@@ -7,7 +7,8 @@
 # commit.
 #
 # The patches are CUMULATIVE and OVERLAP: several touch the same lines (for
-# example 0004 sets MAX_CLIENTS to 2 and 0020 later changes that 2 to 4). They
+# example 0004 sets the sv_maxclients infostring to MAX_CLIENTS and 0020 later
+# rewrites that same line to honour the runtime sv_maxclients cvar). They
 # apply cleanly in order to a *pristine* submodule, but a single patch cannot be
 # reliably reverse-checked against an already-fully-patched tree — its region may
 # have been superseded by a later patch. So this script is NOT idempotent on a

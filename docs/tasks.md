@@ -375,12 +375,17 @@ players fully playable). E1+E2+E3 shipped together as patch **0020**
   (connectResponse 0); `2` accepts one (2 `ClientEnterWorld`,
   connectResponse 1); loopback boots clean.
 
-- [x] **E2 — raise the cap.** (patch 0020)
+- [x] **E2 — raise the cap.** (`MAX_CLIENTS` now in 0004; `PROTOCOL_VERSION` in 0020)
   `#define MAX_CLIENTS 4` (`q_shared.h:618`) and `PROTOCOL_VERSION 41`
-  (`qcommon.h:206`) in the same patch — the `CS_LIGHT_STYLES =
+  (`qcommon.h:206`) — the `CS_LIGHT_STYLES =
   CS_PLAYERS + MAX_CLIENTS` renumber shifts every later configstring,
-  so a stale 2-client build is now rejected at connect on the protocol
-  bump instead of silently desyncing. `svs.numSnapshotEntities`
+  so a stale build is now rejected at connect on the protocol
+  bump instead of silently desyncing. **Consolidation note:** E2
+  originally shipped as a 2→4 re-edit in 0020 on top of 0004's 1→2. The
+  redundant intermediate `2` was later removed — 0004 now sets
+  `MAX_CLIENTS` straight to 4, and 0020 keeps only the `PROTOCOL_VERSION`
+  bump and the `sv_maxclients`/qport work that genuinely layers on the
+  co-op patches. `svs.numSnapshotEntities`
   (`MAX_CLIENTS * 4 * 64`) auto-scales — no manual change. Builds
   clean; loopback + two-client tests unchanged.
 

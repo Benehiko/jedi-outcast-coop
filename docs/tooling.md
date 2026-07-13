@@ -220,8 +220,9 @@ attaches the archives to a GitHub Release.
   file whose resolution list is not in the exact stock form (already patched or
   a different edition).
 - **`patches apply` is not idempotent on a dirty tree** — the patches overlap
-  and are cumulative (e.g. 0004 sets `MAX_CLIENTS` to 2 and 0020 changes it to
-  4), so re-running against a fully-patched submodule aborts. Reset first:
+  and are cumulative (e.g. 0004 sets the `sv_maxclients` infostring to
+  `MAX_CLIENTS` and 0020 later rewrites that same line to honour the runtime
+  cvar), so re-running against a fully-patched submodule aborts. Reset first:
   `git -C openjk checkout -- . && git -C openjk clean -fd`.
 - **Uninstall never force-removes.** It deletes the files/symlinks it created,
   then only `rmdir`s tracked directories that are now empty (deepest-first), so

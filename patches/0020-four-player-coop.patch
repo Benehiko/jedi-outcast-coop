@@ -1,26 +1,15 @@
-diff --git a/code/qcommon/q_shared.h b/code/qcommon/q_shared.h
---- a/code/qcommon/q_shared.h
-+++ b/code/qcommon/q_shared.h
-@@ -615,7 +615,7 @@
- //
- // per-level limits
- //
--#define	MAX_CLIENTS			2 // was 1; Raven's original was 128		// absolute limit
-+#define	MAX_CLIENTS			4 // E2: four-player co-op (was 2; Raven's original was 128)		// absolute limit
- #define MAX_TERRAINS		1 //32
- 
- #define	GENTITYNUM_BITS		10		// don't need to send any more
 diff --git a/code/qcommon/qcommon.h b/code/qcommon/qcommon.h
 --- a/code/qcommon/qcommon.h
 +++ b/code/qcommon/qcommon.h
-@@ -200,7 +200,10 @@
+@@ -200,7 +200,11 @@
  ==============================================================
  */
  
 -#define	PROTOCOL_VERSION	40
-+// E2: bumped from 40 when MAX_CLIENTS went 2->4. CS_LIGHT_STYLES = CS_PLAYERS +
-+// MAX_CLIENTS renumbers every later configstring, so a mismatched (2-client)
-+// build must be rejected at connect rather than left to silently desync.
++// E2: bumped from 40 when MAX_CLIENTS grew past 1 (co-op raises it to 4).
++// CS_LIGHT_STYLES = CS_PLAYERS + MAX_CLIENTS renumbers every later configstring,
++// so a mismatched (stock 1-client) build must be rejected at connect rather than
++// left to silently desync.
 +#define	PROTOCOL_VERSION	41
  
  #define	PORT_SERVER			27960
