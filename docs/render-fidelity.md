@@ -95,6 +95,38 @@ hull lighting.
 Because textures are scaled at load, this is a latched cvar — it takes
 effect on the next engine start, before the first map loads.
 
+### Models were still dark: entity lighting (patch 0027)
+
+Software overbright fixed the *world* but left character models dark and flat
+against the newly-lit floor and walls. The two are lit by different code:
+
+- **World surfaces** are lit by a baked **lightmap texture**. Both the diffuse
+  texture and the lightmap are brightened by the overbright `<< shift` at upload,
+  so lit surfaces punch above mid-grey.
+- **GHOUL2 models** are lit **per vertex** from the light grid
+  (`ambient + directed·(N·L)`, in `R_SetupEntityLighting` /
+  `RB_CalcDiffuseColor`). That colour modulates the skin at draw time; it never
+  passes through a texture upload, so it never received the overbright boost.
+
+In the classic pipeline this was invisible: the hardware gamma ramp doubled the
+*entire framebuffer* at display, lifting model vertex colours along with
+everything else. The software path bakes that doubling into textures instead —
+which does nothing for vertex-lit models. The effect is worst on the parts of a
+rounded model that face away from the light (`N·L ≤ 0`), where the pixel falls
+back to the ambient term alone; measured with `r_debugLight 1`, that ambient sat
+around 40/255 while the lit floor was near full.
+
+Patch
+[`0027-entity-lighting-overbright.patch`](../patches/0027-entity-lighting-overbright.patch)
+re-applies the missing factor to entity `ambient`/`directed` light — and lifts
+the ambient ceiling from `identityLightByte` to full 255 to match — **only on the
+software-overbright path** (`r_overBrightBitsSoftware` on and overbright active).
+The classic hardware-gamma path is untouched, since it still gets its doubling at
+display. There is no new cvar: models simply track the lit world whenever
+software overbright is on. Verified headless (kejim_post, windowed, overbright
+preset): frame mean 0.196 → 0.230 with the extra brightness concentrated on the
+character models, not a flat wash (stddev 0.113 → 0.153).
+
 ### Watch out for saved gamma
 
 The video menu's Brightness slider writes `r_gamma`, and it's easy to end

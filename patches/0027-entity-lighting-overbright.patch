@@ -1,0 +1,34 @@
+--- a/code/rd-vanilla/tr_light.cpp
++++ b/code/rd-vanilla/tr_light.cpp
+@@ -447,10 +447,29 @@
+ 		VectorMA( lightDir, d, dir, lightDir );
+ 	}
+ 
++	// coop render fidelity: entity (model) lighting is applied as per-vertex color
++	// modulating the skin, never through the framebuffer. The classic overbright
++	// path relied on the hardware gamma ramp doubling the *whole* framebuffer at
++	// display time to bring pre-halved lighting back to full — that doubling also
++	// lifted model vertex colors. The software-overbright path (patch 0025) bakes
++	// the overbright << shift into textures at upload instead, which never touches
++	// vertex colors, so models keep only half the light and read dark against the
++	// lit world (worst on faces angled away from the light, which fall back to
++	// ambient alone). Re-apply the missing factor here, and lift the ambient
++	// ceiling to full 255 to match, but only on the software path so the classic
++	// hardware-gamma path is unchanged.
++	float ambientCeil = tr.identityLightByte;
++	if ( r_overBrightBitsSoftware && r_overBrightBitsSoftware->integer && tr.overbrightBits > 0 ) {
++		const float obScale = (float)( 1 << tr.overbrightBits );
++		VectorScale( ent->ambientLight, obScale, ent->ambientLight );
++		VectorScale( ent->directedLight, obScale, ent->directedLight );
++		ambientCeil = 255.0f;
++	}
++
+ 	// clamp ambient
+ 	for ( i = 0 ; i < 3 ; i++ ) {
+-		if ( ent->ambientLight[i] > tr.identityLightByte ) {
+-			ent->ambientLight[i] = tr.identityLightByte;
++		if ( ent->ambientLight[i] > ambientCeil ) {
++			ent->ambientLight[i] = ambientCeil;
+ 		}
+ 	}
+ 
