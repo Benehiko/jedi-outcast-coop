@@ -101,6 +101,43 @@ func TestAutoexecClassicFeel(t *testing.T) {
 	}
 }
 
+func TestAutoexecRenderPreset(t *testing.T) {
+	// Lighting on → high-fidelity preset.
+	on := Defaults()
+	on.Graphics.Lighting = true
+	on.Graphics.MSAA = 4
+	out := string(on.AutoexecBytes())
+	for _, want := range []string{
+		`seta r_overBrightBitsSoftware "1"`,
+		`seta r_picmip "0"`,
+		`seta r_lodbias "-2"`,
+		`seta r_ext_texture_filter_anisotropic "16"`,
+		`seta r_ext_multisample "4"`, // user MSAA, not the preset's 8
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lighting-on autoexec missing %q in:\n%s", want, out)
+		}
+	}
+	// The preset must not hardcode MSAA to 8 (user controls it).
+	if strings.Contains(out, `seta r_ext_multisample "8"`) {
+		t.Error("preset should not hardcode MSAA 8; MSAA is user-controlled")
+	}
+
+	// Lighting off → retail defaults revert the latched cvars.
+	off := Defaults()
+	off.Graphics.Lighting = false
+	outOff := string(off.AutoexecBytes())
+	for _, want := range []string{
+		`seta r_overBrightBitsSoftware "0"`,
+		`seta r_ext_compress_textures "1"`,
+		`seta r_lodbias "0"`,
+	} {
+		if !strings.Contains(outOff, want) {
+			t.Errorf("lighting-off autoexec missing %q in:\n%s", want, outOff)
+		}
+	}
+}
+
 func TestGfxSelection(t *testing.T) {
 	c := Defaults()
 	c.Graphics.Widescreen = true

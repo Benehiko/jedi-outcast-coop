@@ -31,10 +31,60 @@ func (c Config) AutoexecBytes() []byte {
 	b.WriteString(seta("sensitivity", formatFloat(c.Game.Sensitivity)))
 	b.WriteString(seta("g_blasterVelocity", strconv.Itoa(c.Game.BlasterVelocity)))
 
-	// Graphics cvar (patch-backed graphics go through the engine build, not here).
+	// Render-fidelity preset. With lighting on, the software-overbright path (from
+	// the 0024 patch) is paired with the companion fidelity cvars. With it off, the
+	// same cvars are pinned back to retail defaults so a machine previously built
+	// with lighting is fully reverted rather than left with latched values.
+	b.WriteString("\n// render fidelity preset\n")
+	for _, kv := range renderPreset(c.Graphics.Lighting) {
+		b.WriteString(seta(kv.cvar, kv.val))
+	}
+
+	// MSAA is user-controlled (jk2coop graphics), independent of the preset, so it
+	// is written last and wins over any preset value.
 	b.WriteString(seta("r_ext_multisample", strconv.Itoa(c.Graphics.MSAA)))
 
 	return b.Bytes()
+}
+
+type cvarKV struct{ cvar, val string }
+
+// renderPreset returns the render-fidelity cvars for lighting on (high) or off
+// (retail defaults). MSAA is deliberately excluded: it is a separate user
+// setting. Mirrors the shell installer's autoexec_render.cfg preset.
+func renderPreset(lighting bool) []cvarKV {
+	if lighting {
+		return []cvarKV{
+			{"r_overBrightBitsSoftware", "1"},
+			{"r_overBrightBits", "1"},
+			{"r_mapOverBrightBits", "2"},
+			{"r_gamma", "1.0"},
+			{"r_picmip", "0"},
+			{"r_ext_compress_textures", "0"},
+			{"r_texturebits", "32"},
+			{"r_ext_texture_filter_anisotropic", "16"},
+			{"r_textureMode", "GL_LINEAR_MIPMAP_LINEAR"},
+			{"r_swapInterval", "1"},
+			{"r_subdivisions", "1"},
+			{"r_lodbias", "-2"},
+			{"r_lodscale", "20"},
+		}
+	}
+	return []cvarKV{
+		{"r_overBrightBitsSoftware", "0"},
+		{"r_overBrightBits", "0"},
+		{"r_mapOverBrightBits", "0"},
+		{"r_gamma", "1.0"},
+		{"r_picmip", "0"},
+		{"r_ext_compress_textures", "1"},
+		{"r_texturebits", "0"},
+		{"r_ext_texture_filter_anisotropic", "16"},
+		{"r_textureMode", "GL_LINEAR_MIPMAP_LINEAR"},
+		{"r_swapInterval", "0"},
+		{"r_subdivisions", "4"},
+		{"r_lodbias", "0"},
+		{"r_lodscale", "10"},
+	}
 }
 
 // GfxSelection maps the config onto the gfx feature keys — which patch-backed

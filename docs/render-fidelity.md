@@ -147,12 +147,15 @@ renderer cvar, toggling it rebuilds the engine on the next `jk2coop install`;
 `jk2coop graphics` offers to rebuild immediately when you change it.
 
 The core software-overbright behaviour comes from the patch itself
-(`r_overBrightBitsSoftware`); MSAA is a separate, runtime-only setting in the
-same menu (`[graphics] msaa` → `r_ext_multisample`, no rebuild). The remaining
-fidelity cvars below are the recommended companion values — set them in your own
-`autoexec_sp.cfg` or from the console (latched cvars apply after a restart).
+(`r_overBrightBitsSoftware`). On top of that, `jk2coop install` writes the
+companion fidelity cvars into `base/autoexec_sp.cfg` (regenerated from your
+config) whenever `lighting` is on; turning it off writes the same cvars back to
+their retail defaults, so a machine previously built with lighting is fully
+reverted rather than left with latched values. MSAA is a separate, user-controlled
+setting in the same menu (`[graphics] msaa` → `r_ext_multisample`) and is written
+independently of the preset, so it always reflects your choice.
 
-The high-fidelity preset values are:
+The high-fidelity preset writes (latched cvars apply after a restart):
 
 | Cvar | Value | Effect |
 |---|---|---|
@@ -165,11 +168,14 @@ The high-fidelity preset values are:
 | `r_texturebits` | `32` | 32-bit textures — no color banding. |
 | `r_ext_texture_filter_anisotropic` | `16` | 16× anisotropic filtering — crisp at grazing angles. |
 | `r_textureMode` | `GL_LINEAR_MIPMAP_LINEAR` | Trilinear filtering. |
-| `r_ext_multisample` | `8` | 8× MSAA — smooths the stair-stepped polygon edges (ship hulls against sky/rock, crate edges). Latched; the driver falls back to a lower sample count, or none, if it can't provide 8×. |
 | `r_swapInterval` | `1` | Vsync on — stops the frame tearing you get with uncapped swaps when moving the camera. Not latched; applies on the next frame. |
 | `r_subdivisions` | `1` | Finer patch tessellation — smoother curved geometry. |
 | `r_lodbias` | `-2` | Hold higher-detail model LODs at distance. |
 | `r_lodscale` | `20` | Push LOD transitions further out. |
+
+MSAA (`r_ext_multisample`) is **not** part of this preset — set it separately
+via `jk2coop graphics` (`[graphics] msaa`: 0/2/4/8). It is latched; the driver
+falls back to a lower sample count if it can't provide the requested one.
 
 Turning `[graphics] lighting` off (via `jk2coop graphics`) rebuilds the engine
 without the render-fidelity patch, reverting the overbright behaviour; pin the
