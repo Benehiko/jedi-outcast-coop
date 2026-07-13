@@ -10,30 +10,30 @@ import (
 	"github.com/Benehiko/jedi-outcast-coop/internal/paks"
 )
 
-// installOptionalMods resolves and applies the optional game-file mods
-// (widescreen, textures, upscale). Each just adds a zz… override pak to base/;
-// none touch retail data.
+// zz/zzz override paks the optional mods produce, relative to base/. Listed so
+// installOptionalMods can remove a pak that the config no longer wants.
+var optionalPaks = []string{
+	"zz-widescreen-menu.pk3",
+	"zzz-generated-textures.pk3",
+	"zzz-hires-textures.pk3",
+}
+
+// installOptionalMods applies the optional game-file mods the config asks for
+// (widescreen menu, generated/upscaled textures) and removes any it no longer
+// wants. Each just adds a zz… override pak to base/; none touch retail data.
 func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, gamedata, baseDir string) error {
-	any := false
+	cfg := opts.Config
 
-	// --- Modern combat feel + optional cutscene skip ----------------------
-	// Always writes autoexec_sp.cfg (the engine execs it at startup) so the
-	// combat cvars win over any stale openjo_sp.cfg. --combat classic restores
-	// the legacy feel; cutscene auto-skip is a separate opt-in.
-	if err := writeCombatConfig(man, opts, baseDir); err != nil {
+	// --- Autoexec cvars (combat feel, sensitivity, blaster, MSAA, cutscenes) --
+	// Always regenerated from the config; the engine execs it at startup so it
+	// wins over any stale openjo_sp.cfg.
+	if err := writeAutoexec(man, opts, baseDir); err != nil {
 		return err
 	}
-	any = true
 
-	// --- Widescreen / QHD / ultrawide video-menu modes --------------------
-	yes, err := opts.resolveOpt(opts.Widescreen,
-		"Add widescreen / QHD / ultrawide / 4K resolutions to the video menu?")
-	if err != nil {
-		return err
-	}
-	if yes {
-		any = true
-		wsPak := filepath.Join(baseDir, "zz-widescreen-menu.pk3")
+	// --- Widescreen video-menu pak (companion to the 0023 engine patch) ------
+	wsPak := filepath.Join(baseDir, "zz-widescreen-menu.pk3")
+	if cfg.Graphics.Widescreen {
 		opts.sayf("Enabling widescreen video-menu modes…")
 		if _, err := paks.BuildWidescreen(baseDir, wsPak); err != nil {
 			opts.infof("widescreen build failed: %v", err)
@@ -43,14 +43,10 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		}
 	}
 
+	upscale, generate := cfg.GPUPaks()
+
 	// --- Generated AI material textures (GPU + container; Linux-only) ------
-	yes, err = opts.resolveOpt(opts.Textures,
-		"Generate original AI material textures? (needs a Linux GPU + container)")
-	if err != nil {
-		return err
-	}
-	if yes {
-		any = true
+	if generate {
 		txPak := filepath.Join(baseDir, "zzz-generated-textures.pk3")
 		tool := filepath.Join(opts.RepoRoot, "tools", "generate-textures.sh")
 		if haveGPUContainer() {
@@ -69,13 +65,7 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 	}
 
 	// --- Real-ESRGAN hi-res texture upscale (GPU + container; Linux-only) --
-	yes, err = opts.resolveOpt(opts.Upscale,
-		"Build a Real-ESRGAN hi-res texture override from your own retail textures? (needs a Linux GPU + container)")
-	if err != nil {
-		return err
-	}
-	if yes {
-		any = true
+	if upscale {
 		upPak := filepath.Join(baseDir, "zzz-hires-textures.pk3")
 		tool := filepath.Join(opts.RepoRoot, "tools", "upscale-textures.sh")
 		if haveGPUContainer() {
@@ -93,8 +83,23 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		}
 	}
 
-	if !any {
-		opts.infof("no optional mods selected.")
+	// --- Remove paks the config no longer wants ---------------------------
+	wanted := map[string]bool{
+		"zz-widescreen-menu.pk3":     cfg.Graphics.Widescreen,
+		"zzz-generated-textures.pk3": generate,
+		"zzz-hires-textures.pk3":     upscale,
+	}
+	for _, name := range optionalPaks {
+		if wanted[name] {
+			continue
+		}
+		p := filepath.Join(baseDir, name)
+		if fileExists(p) {
+			if err := os.Remove(p); err == nil {
+				man.Forget(p)
+				opts.infof("removed %s (disabled in config)", name)
+			}
+		}
 	}
 	return nil
 }

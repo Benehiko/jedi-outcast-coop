@@ -9,19 +9,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Benehiko/jedi-outcast-coop/internal/config"
+	"github.com/Benehiko/jedi-outcast-coop/internal/gfx"
 	"github.com/Benehiko/jedi-outcast-coop/internal/paks"
-)
-
-// OptState is a tri-state opt-in decision for an optional mod.
-type OptState int
-
-const (
-	// OptAsk prompts on a TTY, resolves to "no" off a TTY.
-	OptAsk OptState = iota
-	// OptYes force-enables.
-	OptYes
-	// OptNo force-disables.
-	OptNo
 )
 
 // Options configures an install run.
@@ -34,22 +24,16 @@ type Options struct {
 	// base/assets0.pk3).
 	GameData string
 
-	Widescreen OptState
-	Textures   OptState
-	Upscale    OptState
-
-	// Combat is the combat feel written to autoexec_sp.cfg: "modern" (default)
-	// or "classic". SkipCutscenes controls the map-intro cutscene auto-skip.
-	// Sensitivity is the base mouse sensitivity written in modern mode.
-	Combat        string
-	Sensitivity   string
-	SkipCutscenes OptState
+	// Config is the single source of truth for every user setting: the autoexec
+	// cvars, which patch-backed graphics features the engine is built with, and
+	// which optional GPU paks to build.
+	Config *config.Config
 
 	// AssumeYes auto-confirms prompts that would otherwise be shown.
 	AssumeYes bool
 
 	// Out receives progress text. Prompt reads y/N answers (nil = never
-	// interactive; "ask" resolves to "no").
+	// interactive).
 	Out    io.Writer
 	Prompt func(question string) (bool, error)
 }
@@ -69,9 +53,21 @@ func (o *Options) infof(format string, a ...any) {
 // Install stages the data dir and installs the launchers for the current
 // platform, then applies the selected optional mods.
 func Install(ctx context.Context, p Platform, opts *Options) error {
-	engineBin, engineDir := resolveEngine(opts.BuildDir, p)
+	if opts.Config == nil {
+		cfg := config.Defaults()
+		opts.Config = &cfg
+	}
 
 	opts.sayf("Installing JK2 co-op (%s, %s)…", p.OS, p.Arch)
+
+	// Ensure the engine is built with the patch-backed graphics features the
+	// config wants (widescreen / render fidelity). Rebuilds only when they
+	// differ from what's already built, so a plain reinstall is fast.
+	if err := ensureEngineMatchesConfig(ctx, opts); err != nil {
+		return err
+	}
+
+	engineBin, engineDir := resolveEngine(opts.BuildDir, p)
 
 	// Preconditions: the build must exist.
 	if engineBin == "" || !fileExists(engineBin) {
@@ -104,6 +100,16 @@ func Install(ctx context.Context, p Platform, opts *Options) error {
 	man, err := LoadManifest(p.ManifestPath())
 	if err != nil {
 		return err
+	}
+
+	// Persist the config so its values survive across installs and are removed on
+	// uninstall, and track it in the manifest.
+	if cfgPath, err := opts.Config.Save(); err != nil {
+		opts.infof("could not save config: %v", err)
+	} else if err := man.Add(cfgPath); err != nil {
+		return err
+	} else {
+		opts.infof("config: %s", cfgPath)
 	}
 
 	baseDir := p.BaseDir()
@@ -213,23 +219,47 @@ func Uninstall(p Platform, opts *Options) error {
 	return nil
 }
 
-// resolveOpt resolves a tri-state opt-in into a decision, prompting if "ask".
-func (o *Options) resolveOpt(state OptState, question string) (bool, error) {
-	switch state {
-	case OptYes:
-		return true, nil
-	case OptNo:
-		return false, nil
-	default:
-		if o.Prompt == nil {
-			return false, nil
-		}
-		if o.AssumeYes {
-			o.infof("%s [y/N] y (--yes)", question)
-			return true, nil
-		}
-		return o.Prompt(question)
+// ensureEngineMatchesConfig rebuilds the engine when the patch-backed graphics
+// features it is currently built with differ from what the config wants. It
+// resets the OpenJK submodule, reapplies the co-op base plus the selected
+// features, and rebuilds — the same operation the graphics menu performs. When
+// the built selection already matches, it is a no-op (no reset, no rebuild).
+func ensureEngineMatchesConfig(ctx context.Context, opts *Options) error {
+	if opts.RepoRoot == "" {
+		// No repo (e.g. installing from a prebuilt drop): trust what's built.
+		return nil
 	}
+	mgr := &gfx.Manager{
+		Submodule:  filepath.Join(opts.RepoRoot, "openjk"),
+		PatchesDir: filepath.Join(opts.RepoRoot, "patches"),
+	}
+	have, err := mgr.Detect(ctx)
+	if err != nil {
+		// A missing/uninitialised submodule is not fatal for an install from a
+		// prebuilt engine; skip the match step.
+		opts.infof("skipping engine feature check: %v", err)
+		return nil
+	}
+	want := opts.Config.GfxSelection()
+	if !gfxSelectionDiffers(have, want) {
+		return nil
+	}
+	opts.sayf("Rebuilding engine to match graphics config (%s)…", gfx.SummaryLine(want))
+	if _, err := mgr.Apply(ctx, want); err != nil {
+		return err
+	}
+	return gfx.Build(ctx, filepath.Join(opts.RepoRoot, "openjk"), opts.BuildDir, opts.Out)
+}
+
+// gfxSelectionDiffers reports whether the built feature set (have) differs from
+// the wanted one for any known gfx feature key.
+func gfxSelectionDiffers(have, want map[string]bool) bool {
+	for _, f := range gfx.Features {
+		if have[f.Key] != want[f.Key] {
+			return true
+		}
+	}
+	return false
 }
 
 func linkTracked(man *Manifest, target, linkPath string) error {

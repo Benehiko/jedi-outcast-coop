@@ -49,6 +49,23 @@ architecture, e.g. `jospgamearm64.dylib` and `rdjosp-vanilla_arm64.dylib`.
 
 ## 2. Install (recommended: one command)
 
+The cross-platform `jk2coop` Go binary is the recommended installer (see
+[tooling.md](tooling.md)):
+
+```sh
+jk2coop install                              # autodetect Steam GameData
+jk2coop install --gamedata "/path/to/Jedi Outcast/GameData"
+jk2coop install -y                           # assume yes to prompts (non-interactive)
+```
+
+`jk2coop install` builds the engine, symlinks your retail assets and the
+co-op gamecode into place, applies your config (autoexec cvars, the
+patch-backed graphics features, and any optional texture paks), and
+installs the launchers. Run `jk2coop uninstall` to remove everything it
+installed.
+
+The equivalent shell installer remains and works unchanged:
+
 ```sh
 tools/install-coop-macos.sh                  # autodetect Steam GameData
 tools/install-coop-macos.sh --gamedata "/path/to/Jedi Outcast/GameData"
@@ -69,11 +86,29 @@ handled for you:
 
 It stages the data directory with **symlinks** to your retail `assets*.pk3`,
 the built co-op gamecode, and the Co-op UI overlay. It is idempotent, and
-`--uninstall` removes exactly what it created. **Retail files are never
-touched.**
+`jk2coop uninstall` (or the shell installer's `--uninstall`) removes exactly
+what it created. **Retail files are never touched.**
 
 If `~/bin` is not on your `PATH`, either add it or call the launchers by their
 full path.
+
+### Settings (config file)
+
+Gameplay and graphics preferences live in a single config file at
+`~/Library/Application Support/jk2coop/config.toml`. Edit it with the two
+settings TUIs — or by hand — and it is applied on the next `install` or
+`launch`:
+
+```sh
+jk2coop game        # mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes
+jk2coop graphics    # widescreen, lighting, MSAA, texture upscale/generate (alias: gfx)
+```
+
+`[game]` settings are runtime cvars. Under `[graphics]`, `widescreen` and
+`lighting` are patch-backed and require an engine rebuild to change (which
+`jk2coop install` handles); `msaa` and the texture paks are not. See the
+[Linux guide](install-linux.md#settings-config-file) for the full TOML
+schema.
 
 ### Optional mods
 
@@ -100,8 +135,12 @@ are offered but resolve to a printed command rather than run.
 
 ### Combat and render presets
 
-As on Linux, two cvar-only presets are written to `base/` and default on
-(revertible; `--uninstall` removes them):
+With `jk2coop`, combat feel and render fidelity are set through the config
+file (`jk2coop game` and `jk2coop graphics`) rather than install flags — see
+[Settings](#settings-config-file) above. Both default on.
+
+The shell installer still writes two cvar-only presets to `base/` and takes
+flags for them (they default on; `--uninstall` removes them):
 
 - `--combat modern|classic` (default `modern`) — see
   [modern-combat.md](modern-combat.md).
@@ -114,6 +153,17 @@ As on Linux, two cvar-only presets are written to `base/` and default on
 > hit a snag, please open an issue.
 
 ## 3. Play
+
+With the `jk2coop` binary:
+
+```sh
+jk2coop launch                     # play; hosts a co-op game on UDP 29070 by default
+jk2coop host                       # explicitly host a co-op game (machine 1)
+jk2coop join <host-ip>             # join it (machine 2)
+jk2coop launch --solo              # single-player
+```
+
+Or with the launcher scripts the shell installer writes:
 
 ```sh
 jk2coop-host                       # host a game on UDP 29070 (machine 1)

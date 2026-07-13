@@ -70,6 +70,38 @@ func (m *Manifest) Add(p string) error {
 // Entries returns the tracked paths in insertion order.
 func (m *Manifest) Entries() []string { return m.entries }
 
+// Forget drops a path from the manifest and rewrites the file. Used when an
+// install removes a previously-tracked artifact (e.g. an override pak the user
+// has since disabled) so a later uninstall does not try to remove it again.
+func (m *Manifest) Forget(p string) {
+	if _, ok := m.seen[p]; !ok {
+		return
+	}
+	delete(m.seen, p)
+	kept := m.entries[:0]
+	for _, e := range m.entries {
+		if e != p {
+			kept = append(kept, e)
+		}
+	}
+	m.entries = kept
+	m.rewrite()
+}
+
+// rewrite persists the current entries, replacing the file. Best-effort: a
+// failure leaves the previous file (with the now-removed line) in place, which
+// only means a stale entry, not data loss.
+func (m *Manifest) rewrite() {
+	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
+		return
+	}
+	var b strings.Builder
+	for _, e := range m.entries {
+		b.WriteString(e + "\n")
+	}
+	_ = os.WriteFile(m.path, []byte(b.String()), 0o644)
+}
+
 // Exists reports whether the manifest file is present on disk.
 func (m *Manifest) Exists() bool { return fileExists(m.path) }
 

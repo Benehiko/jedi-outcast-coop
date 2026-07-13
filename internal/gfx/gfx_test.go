@@ -15,8 +15,6 @@ import (
 var markerLines = []string{
 	"a", "b", "c",
 	"BASE", // co-op base patch target
-	"d", "e", "f",
-	"COMBAT_HERE",
 	"g", "h", "i",
 	"WIDE_HERE",
 	"j", "k", "l",
@@ -61,9 +59,8 @@ func initRepo(t *testing.T) (sub, patches string) {
 		}
 	}
 	write("0001-base.patch", "BASE", "BASE_APPLIED")
-	write(Features[0].Patch, "COMBAT_HERE", "COMBAT_APPLIED")
-	write(Features[1].Patch, "WIDE_HERE", "WIDE_APPLIED")
-	write(Features[2].Patch, "FID_HERE", "FID_APPLIED")
+	write(Features[0].Patch, "WIDE_HERE", "WIDE_APPLIED")
+	write(Features[1].Patch, "FID_HERE", "FID_APPLIED")
 	return sub, patches
 }
 
@@ -109,12 +106,9 @@ func TestApplyAndDetectSubsets(t *testing.T) {
 
 	cases := []map[string]bool{
 		{},
-		{"modern-combat": true},
 		{"widescreen": true},
 		{"render-fidelity": true},
-		{"modern-combat": true, "widescreen": true},
 		{"widescreen": true, "render-fidelity": true},
-		{"modern-combat": true, "widescreen": true, "render-fidelity": true},
 	}
 	for _, want := range cases {
 		if _, err := m.Apply(ctx, want); err != nil {
@@ -143,8 +137,8 @@ func TestSummaryLine(t *testing.T) {
 		want string
 	}{
 		{map[string]bool{}, "all graphics features off"},
-		{map[string]bool{"widescreen": true, "modern-combat": true, "render-fidelity": true}, "modern-combat, render-fidelity, widescreen (all on)"},
-		{map[string]bool{"widescreen": true}, "widescreen (modern-combat, render-fidelity off)"},
+		{map[string]bool{"widescreen": true, "render-fidelity": true}, "render-fidelity, widescreen (all on)"},
+		{map[string]bool{"widescreen": true}, "widescreen (render-fidelity off)"},
 	}
 	for _, tc := range tests {
 		if got := SummaryLine(tc.sel); got != tc.want {

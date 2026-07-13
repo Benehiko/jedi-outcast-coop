@@ -27,7 +27,7 @@ Or, using the cross-platform `jk2coop` Go binary (equivalent; see
 
 ```sh
 go build -mod=vendor -o jk2coop .
-./jk2coop patches apply
+./jk2coop dev patches apply
 ```
 
 The patches are cumulative and overlap (several touch the same lines — e.g.
