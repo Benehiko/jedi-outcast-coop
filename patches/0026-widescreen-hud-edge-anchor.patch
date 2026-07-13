@@ -1,0 +1,1218 @@
+diff --git a/code/cgame/cg_public.h b/code/cgame/cg_public.h
+index 115fdd3f..a69f600b 100644
+--- a/code/cgame/cg_public.h
++++ b/code/cgame/cg_public.h
+@@ -221,6 +221,8 @@ Ghoul2 Insert End
+ 
+ 	CG_OPENJK_MENU_PAINT,
+ 	CG_OPENJK_GETMENU_BYNAME,
++
++	CG_R_SET2DWIDE,		// widescreen HUD edge anchoring
+ } cgameImport_t;
+ 
+ #ifdef JK2_MODE
+@@ -346,6 +348,8 @@ Ghoul2 Insert End
+ 
+ 	CG_OPENJK_MENU_PAINT_JK2,
+ 	CG_OPENJK_GETMENU_BYNAME_JK2,
++
++	CG_R_SET2DWIDE_JK2,		// widescreen HUD edge anchoring
+ } cgameJK2Import_t;
+ #endif
+ 
+diff --git a/code/client/cl_cgame.cpp b/code/client/cl_cgame.cpp
+index b9d7b6fc..a91483e3 100644
+--- a/code/client/cl_cgame.cpp
++++ b/code/client/cl_cgame.cpp
+@@ -32,8 +32,293 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
+ #include "vmachine.h"
+ #include "qcommon/stringed_ingame.h"
+ #include "sys/sys_loadlib.h"
++#include "../qcommon/cm_public.h"
+ 
+ vm_t	cgvm;
++
++// dual-load: on a serverless remote client the shared game/cgame library is
++// loaded a second time and initialised through GetCGameAPI (see A1). It needs
++// a client-safe game_import_t: qcommon services pass through unchanged, all
++// renderer/collision/sound-backed services (G2API_*, RE_*, WE_*,
++// CM_TotalMapContents, CM_AreasConnected, VoiceVolume) forward exactly as the
++// server's SV_InitGameProgs does — the renderer and collision model both live
++// in the client process — and only the genuinely server-state services
++// (entity linking, traces against server entities, PVS, userinfo, ...) become
++// loud stubs. Each stub fired at runtime is a discovered work item for the
++// A5 burn-down. Built by CL_BuildCGameImport below, called only from the
++// dual-load branch of CL_InitCGame; the host path is untouched.
++extern refexport_t	re;
++extern int	s_entityWavVol[MAX_GENTITIES];	// snd_dma.cpp
++typedef void GetCGameAPIProc( game_import_t * );
++
++static void *cl_cgame_library = NULL;	// dual-load handle; NULL on the host
++
++// ---- gamestate-backed services (A2 bucket 2) ----
++
++// GetConfigstring: copy the string the server sent us at this index. Same
++// source as CL_InitCGame's mapname lookup (cl.gameState).
++static void CL_CG_GetConfigstring( int index, char *buffer, int bufferSize ) {
++	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
++		Com_Error( ERR_DROP, "CL_CG_GetConfigstring: bad index %i", index );
++	}
++	if ( !bufferSize ) {
++		return;
++	}
++	const char *s = cl.gameState.stringData + cl.gameState.stringOffsets[ index ];
++	Q_strncpyz( buffer, s, bufferSize );
++}
++
++// SetConfigstring: LOOKUP-ONLY on the client. Registration helpers
++// (G_EffectIndex/G_SoundIndex/...) call this to *allocate* an index; but the
++// string is already in the gamestate at the index the SERVER chose, so a
++// client-side allocation would silently desync every later index. We never
++// write: if the requested string already matches what the server sent, this
++// is a harmless no-op; on a mismatch we warn once and still do nothing.
++static void CL_CG_SetConfigstring( int index, const char *string ) {
++	static qboolean warned = qfalse;
++	if ( index < 0 || index >= MAX_CONFIGSTRINGS ) {
++		return;
++	}
++	if ( !string ) {
++		string = "";
++	}
++	const char *existing = cl.gameState.stringData + cl.gameState.stringOffsets[ index ];
++	if ( strcmp( existing, string ) && !warned ) {
++		warned = qtrue;
++		Com_Printf( "^3CL_cgame: SetConfigstring(%i) ignored on client (server-authoritative)\n", index );
++	}
++}
++
++// GetServerinfo: the serverinfo string is CS_SERVERINFO in the gamestate.
++static void CL_CG_GetServerinfo( char *buffer, int bufferSize ) {
++	CL_CG_GetConfigstring( CS_SERVERINFO, buffer, bufferSize );
++}
++
++// ---- server-only loud stubs (A2 bucket 3) ----
++// Only services that read/write live server state (sv/svs/server entities).
++// Everything renderer/collision/sound-backed is a real pass-through below.
++
++static int cl_cg_voiceVolumeDummy = 0;	// unused; VoiceVolume points at s_entityWavVol
++
++// compile-helper: Z_Malloc is a macro, so the import needs a real function
++// (mirrors the server's G_ZMalloc_Helper).
++static void *CL_CG_ZMalloc( int iSize, memtag_t eTag, qboolean bZeroit ) {
++	return Z_Malloc( iSize, eTag, bZeroit );
++}
++
++#define CL_CG_STUB_WARN(name) \
++	static qboolean warned = qfalse; \
++	if ( !warned ) { warned = qtrue; Com_Printf( "^3CL_cgame stub: " #name " called\n" ); }
++
++static void CL_CG_Stub_WriteCam( const char *text ) { CL_CG_STUB_WARN(WriteCam); }
++static void CL_CG_Stub_FlushCamFile() { CL_CG_STUB_WARN(FlushCamFile); }
++static void CL_CG_Stub_DropClient( int clientNum, const char *reason ) { CL_CG_STUB_WARN(DropClient); }
++static void CL_CG_Stub_SendServerCommand( int clientNum, const char *fmt, ... ) { CL_CG_STUB_WARN(SendServerCommand); }
++
++static void CL_CG_Stub_linkentity( gentity_t *ent ) { CL_CG_STUB_WARN(linkentity); }
++static void CL_CG_Stub_unlinkentity( gentity_t *ent ) { CL_CG_STUB_WARN(unlinkentity); }
++static int CL_CG_Stub_EntitiesInBox( const vec3_t mins, const vec3_t maxs, gentity_t **list, int maxcount ) {
++	CL_CG_STUB_WARN(EntitiesInBox); return 0;
++}
++static qboolean CL_CG_Stub_EntityContact( const vec3_t mins, const vec3_t maxs, const gentity_t *ent ) {
++	CL_CG_STUB_WARN(EntityContact); return qfalse;
++}
++static void CL_CG_Stub_trace( trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end,
++		const int passEntityNum, const int contentmask, const EG2_Collision eG2TraceType, const int useLod ) {
++	CL_CG_STUB_WARN(trace);
++	if ( results ) {
++		memset( results, 0, sizeof( *results ) );
++		results->fraction = 1.0f;
++		results->entityNum = ENTITYNUM_NONE;
++	}
++}
++static int CL_CG_Stub_pointcontents( const vec3_t point, int passEntityNum ) { CL_CG_STUB_WARN(pointcontents); return 0; }
++static void CL_CG_Stub_SetBrushModel( gentity_t *ent, const char *name ) { CL_CG_STUB_WARN(SetBrushModel); }
++static qboolean CL_CG_Stub_inPVS( const vec3_t p1, const vec3_t p2 ) { CL_CG_STUB_WARN(inPVS); return qtrue; }
++static qboolean CL_CG_Stub_inPVSIgnorePortals( const vec3_t p1, const vec3_t p2 ) { CL_CG_STUB_WARN(inPVSIgnorePortals); return qtrue; }
++static void CL_CG_Stub_AdjustAreaPortalState( gentity_t *ent, qboolean open ) { CL_CG_STUB_WARN(AdjustAreaPortalState); }
++static void CL_CG_Stub_GetUserinfo( int num, char *buffer, int bufferSize ) {
++	CL_CG_STUB_WARN(GetUserinfo);
++	if ( buffer && bufferSize > 0 ) buffer[0] = '\0';
++}
++static void CL_CG_Stub_SetUserinfo( int num, const char *buffer ) { CL_CG_STUB_WARN(SetUserinfo); }
++static const char *CL_CG_Stub_SetActiveSubBSP( int index ) { CL_CG_STUB_WARN(SetActiveSubBSP); return NULL; }
++
++// Gore is behind _G2_GORE (off in this build); re.G2API_*SkinGore is then
++// compiled out, so these bridge the import's void* signature to a no-op,
++// exactly as the server's #else path does.
++static void CL_CG_G2API_AddSkinGore( CGhoul2Info_v &ghoul2, SSkinGoreData &gore ) { (void)ghoul2; (void)gore; }
++static void CL_CG_G2API_ClearSkinGore( CGhoul2Info_v &ghoul2 ) { (void)ghoul2; }
++
++/*
++====================
++CL_BuildCGameImport
++
++Fill a game_import_t for the dual-loaded cgame. Mirrors the server's
++SV_InitGameProgs table in the same order, one of three buckets per entry:
++pass-through qcommon/renderer/collision service, gamestate-backed, or a loud
++server-only stub.
++====================
++*/
++static void CL_BuildCGameImport( game_import_t &import ) {
++	// bucket 1: qcommon services (identical to the server's assignments)
++	import.Printf = Com_Printf;
++	import.WriteCam = CL_CG_Stub_WriteCam;
++	import.FlushCamFile = CL_CG_Stub_FlushCamFile;
++	import.Error = Com_Error;
++
++	import.Milliseconds = Sys_Milliseconds2;
++
++	import.DropClient = CL_CG_Stub_DropClient;
++
++	import.SendServerCommand = CL_CG_Stub_SendServerCommand;
++
++	import.linkentity = CL_CG_Stub_linkentity;
++	import.unlinkentity = CL_CG_Stub_unlinkentity;
++	import.EntitiesInBox = CL_CG_Stub_EntitiesInBox;
++	import.EntityContact = CL_CG_Stub_EntityContact;
++	import.trace = CL_CG_Stub_trace;
++	import.pointcontents = CL_CG_Stub_pointcontents;
++	import.totalMapContents = CM_TotalMapContents;	// collision model (client-loaded)
++	import.SetBrushModel = CL_CG_Stub_SetBrushModel;
++
++	import.inPVS = CL_CG_Stub_inPVS;
++	import.inPVSIgnorePortals = CL_CG_Stub_inPVSIgnorePortals;
++
++	// bucket 2: gamestate-backed
++	import.SetConfigstring = CL_CG_SetConfigstring;
++	import.GetConfigstring = CL_CG_GetConfigstring;
++
++	import.SetUserinfo = CL_CG_Stub_SetUserinfo;
++	import.GetUserinfo = CL_CG_Stub_GetUserinfo;
++
++	import.GetServerinfo = CL_CG_GetServerinfo;
++
++	// bucket 1 continued: cvars, args, filesystem (all qcommon)
++	import.cvar = Cvar_Get;
++	import.cvar_set = Cvar_Set;
++	import.Cvar_VariableIntegerValue = Cvar_VariableIntegerValue;
++	import.Cvar_VariableStringBuffer = Cvar_VariableStringBuffer;
++
++	import.argc = Cmd_Argc;
++	import.argv = Cmd_Argv;
++	import.SendConsoleCommand = Cbuf_AddText;
++
++	import.FS_FOpenFile = FS_FOpenFileByMode;
++	import.FS_Read = FS_Read;
++	import.FS_Write = FS_Write;
++	import.FS_FCloseFile = FS_FCloseFile;
++	import.FS_ReadFile = FS_ReadFile;
++	import.FS_FreeFile = FS_FreeFile;
++	import.FS_GetFileList = FS_GetFileList;
++
++	import.saved_game = NULL;	// no save/load on a remote client
++
++	import.AdjustAreaPortalState = CL_CG_Stub_AdjustAreaPortalState;
++	import.AreasConnected = CM_AreasConnected;	// collision model (client-loaded)
++
++	import.VoiceVolume = s_entityWavVol;	// client sound state
++
++	import.Malloc = CL_CG_ZMalloc;
++	import.Free = Z_Free;
++	import.bIsFromZone = Z_IsFromZone;
++
++	// renderer-backed (Ghoul2 / weather / skin) — the renderer lives in the
++	// client, so every one of these is a real pass-through, exactly as the
++	// server forwards them to re.*
++	import.G2API_AddBolt = re.G2API_AddBolt;
++	import.G2API_AttachEnt = re.G2API_AttachEnt;
++	import.G2API_AttachG2Model = re.G2API_AttachG2Model;
++	import.G2API_CollisionDetect = re.G2API_CollisionDetect;
++	import.G2API_DetachEnt = re.G2API_DetachEnt;
++	import.G2API_DetachG2Model = re.G2API_DetachG2Model;
++	import.G2API_GetAnimFileName = re.G2API_GetAnimFileName;
++	import.G2API_GetBoltMatrix = re.G2API_GetBoltMatrix;
++	import.G2API_GetBoneAnim = re.G2API_GetBoneAnim;
++	import.G2API_GetBoneAnimIndex = re.G2API_GetBoneAnimIndex;
++	import.G2API_AddSurface = re.G2API_AddSurface;
++	import.G2API_HaveWeGhoul2Models = re.G2API_HaveWeGhoul2Models;
++	import.G2API_InitGhoul2Model = re.G2API_InitGhoul2Model;
++	import.G2API_SetBoneAngles = re.G2API_SetBoneAngles;
++	import.G2API_SetBoneAnglesMatrix = re.G2API_SetBoneAnglesMatrix;
++	import.G2API_SetBoneAnim = re.G2API_SetBoneAnim;
++	import.G2API_SetSkin = re.G2API_SetSkin;
++	import.G2API_CopyGhoul2Instance = re.G2API_CopyGhoul2Instance;
++	import.G2API_SetBoneAnglesIndex = re.G2API_SetBoneAnglesIndex;
++	import.G2API_SetBoneAnimIndex = re.G2API_SetBoneAnimIndex;
++	import.G2API_IsPaused = re.G2API_IsPaused;
++	import.G2API_ListBones = re.G2API_ListBones;
++	import.G2API_ListSurfaces = re.G2API_ListSurfaces;
++	import.G2API_PauseBoneAnim = re.G2API_PauseBoneAnim;
++	import.G2API_PauseBoneAnimIndex = re.G2API_PauseBoneAnimIndex;
++	import.G2API_PrecacheGhoul2Model = re.G2API_PrecacheGhoul2Model;
++	import.G2API_RemoveBolt = re.G2API_RemoveBolt;
++	import.G2API_RemoveBone = re.G2API_RemoveBone;
++	import.G2API_RemoveGhoul2Model = re.G2API_RemoveGhoul2Model;
++	import.G2API_SetLodBias = re.G2API_SetLodBias;
++	import.G2API_SetRootSurface = re.G2API_SetRootSurface;
++	import.G2API_SetShader = re.G2API_SetShader;
++	import.G2API_SetSurfaceOnOff = re.G2API_SetSurfaceOnOff;
++	import.G2API_StopBoneAngles = re.G2API_StopBoneAngles;
++	import.G2API_StopBoneAnim = re.G2API_StopBoneAnim;
++	import.G2API_SetGhoul2ModelFlags = re.G2API_SetGhoul2ModelFlags;
++	import.G2API_AddBoltSurfNum = re.G2API_AddBoltSurfNum;
++	import.G2API_RemoveSurface = re.G2API_RemoveSurface;
++	import.G2API_GetAnimRange = re.G2API_GetAnimRange;
++	import.G2API_GetAnimRangeIndex = re.G2API_GetAnimRangeIndex;
++	import.G2API_GiveMeVectorFromMatrix = re.G2API_GiveMeVectorFromMatrix;
++	import.G2API_GetGhoul2ModelFlags = re.G2API_GetGhoul2ModelFlags;
++	import.G2API_CleanGhoul2Models = re.G2API_CleanGhoul2Models;
++	import.TheGhoul2InfoArray = re.TheGhoul2InfoArray;
++	import.G2API_GetParentSurface = re.G2API_GetParentSurface;
++	import.G2API_GetSurfaceIndex = re.G2API_GetSurfaceIndex;
++	import.G2API_GetSurfaceName = re.G2API_GetSurfaceName;
++	import.G2API_GetGLAName = re.G2API_GetGLAName;
++	import.G2API_SetNewOrigin = re.G2API_SetNewOrigin;
++	import.G2API_GetBoneIndex = re.G2API_GetBoneIndex;
++	import.G2API_StopBoneAnglesIndex = re.G2API_StopBoneAnglesIndex;
++	import.G2API_StopBoneAnimIndex = re.G2API_StopBoneAnimIndex;
++	import.G2API_SetBoneAnglesMatrixIndex = re.G2API_SetBoneAnglesMatrixIndex;
++	import.G2API_SetAnimIndex = re.G2API_SetAnimIndex;
++	import.G2API_GetAnimIndex = re.G2API_GetAnimIndex;
++
++	import.G2API_SaveGhoul2Models = re.G2API_SaveGhoul2Models;
++	import.G2API_LoadGhoul2Models = re.G2API_LoadGhoul2Models;
++	import.G2API_LoadSaveCodeDestructGhoul2Info = re.G2API_LoadSaveCodeDestructGhoul2Info;
++	import.G2API_GetAnimFileNameIndex = re.G2API_GetAnimFileNameIndex;
++	import.G2API_GetAnimFileInternalNameIndex = re.G2API_GetAnimFileInternalNameIndex;
++	import.G2API_GetSurfaceRenderStatus = re.G2API_GetSurfaceRenderStatus;
++
++	import.G2API_SetRagDoll = re.G2API_SetRagDoll;
++	import.G2API_AnimateG2Models = re.G2API_AnimateG2Models;
++
++	import.G2API_RagPCJConstraint = re.G2API_RagPCJConstraint;
++	import.G2API_RagPCJGradientSpeed = re.G2API_RagPCJGradientSpeed;
++	import.G2API_RagEffectorGoal = re.G2API_RagEffectorGoal;
++	import.G2API_GetRagBonePos = re.G2API_GetRagBonePos;
++	import.G2API_RagEffectorKick = re.G2API_RagEffectorKick;
++	import.G2API_RagForceSolve = re.G2API_RagForceSolve;
++
++	import.G2API_SetBoneIKState = re.G2API_SetBoneIKState;
++	import.G2API_IKMove = re.G2API_IKMove;
++
++	import.G2API_AddSkinGore = CL_CG_G2API_AddSkinGore;
++	import.G2API_ClearSkinGore = CL_CG_G2API_ClearSkinGore;
++
++	import.SetActiveSubBSP = CL_CG_Stub_SetActiveSubBSP;	// server sub-BSP state
++
++	import.RE_RegisterSkin = re.RegisterSkin;
++	import.RE_GetAnimationCFG = re.GetAnimationCFG;
++
++	import.WE_GetWindVector = re.GetWindVector;
++	import.WE_GetWindGusting = re.GetWindGusting;
++	import.WE_IsOutside = re.IsOutside;
++	import.WE_IsOutsideCausingPain = re.IsOutsideCausingPain;
++	import.WE_GetChanceOfSaberFizz = re.GetChanceOfSaberFizz;
++	import.WE_IsShaking = re.IsShaking;
++	import.WE_AddWeatherZone = re.AddWeatherZone;
++	import.WE_SetTempGlobalFogColor = re.SetTempGlobalFogColor;
++}
+ /*
+ Ghoul2 Insert Start
+ */
+@@ -240,6 +525,15 @@ qboolean CL_GetDefaultState(int index, entityState_t *state)
+ 		return qfalse;
+ 	}
+ 
++	// dual-load: sv.svEntities is server memory. On a remote client with no
++	// local server it is zeroed; reading a baseline from it is meaningless.
++	// Return a zeroed state so the cgame falls back to delta-from-null.
++	if ( !com_sv_running->integer )
++	{
++		memset( state, 0, sizeof( *state ) );
++		return qfalse;
++	}
++
+ 	// Is this safe? I think so. But it's still ugly as sin.
+ 	if (!(sv.svEntities[index].baseline.eFlags & EF_PERMANENT))
+ //	if (!(cl.entityBaselines[index].eFlags & EF_PERMANENT))
+@@ -432,6 +726,15 @@ void CL_ShutdownCGame( void ) {
+ 
+ //	VM_Free( cgvm );
+ //	cgvm = NULL;
++
++	// dual-load: if this client owns its own copy of the library (remote
++	// client, no local server), unload it here. On the host cl_cgame_library
++	// is NULL — SV_ShutdownGameProgs owns the single shared handle.
++	if ( cl_cgame_library ) {
++		Sys_UnloadDll( cl_cgame_library );
++		cl_cgame_library = NULL;
++		cgvm.entryPoint = 0;
++	}
+ }
+ 
+ #ifdef JK2_MODE
+@@ -793,6 +1096,9 @@ Ghoul2 Insert End
+ 		case CG_OPENJK_GETMENU_BYNAME_JK2:
+ 			return CG_OPENJK_GETMENU_BYNAME;
+ 			break;
++		case CG_R_SET2DWIDE_JK2:
++			return CG_R_SET2DWIDE;
++			break;
+ 	}
+ 	return (cgameImport_t)-1;
+ }
+@@ -1045,6 +1351,9 @@ intptr_t CL_CgameSystemCalls( intptr_t *args ) {
+ 	case CG_R_SCISSOR:
+ 		re.Scissor( VMF(1), VMF(2), VMF(3), VMF(4));
+ 		return 0;
++	case CG_R_SET2DWIDE:
++		re.Set2DWide( (qboolean)(args[1] != 0) );
++		return 0;
+ 	case CG_GETGLCONFIG:
+ 		CL_GetGlconfig( (glconfig_t *) VMA(1) );
+ 		return 0;
+@@ -1407,6 +1716,42 @@ void CL_InitCGame( void ) {
+ 
+ 	cls.state = CA_LOADING;
+ 
++	// dual-load: on a serverless remote client the cgame VM was never set up
++	// by SV_InitGameProgs (there is no local server), so cgvm.entryPoint is
++	// null. Load our own copy of the shared library, give it a client-safe
++	// import table, and initialise the VM. On the host this branch is skipped
++	// because SV_InitGameProgs already populated cgvm.entryPoint.
++	if ( !cgvm.entryPoint ) {
++		Com_Printf( "^5dual-load: initialising cgame on remote client\n" );	// A3 probe (temporary)
++
++		// M3: tell the dual-loaded cgame it is a serverless remote client. The
++		// cgame reads this cvar in GetCGameAPI (to allocate client structures for
++		// rendering other players/NPCs) and in CG_Init (to set its cg_remoteClient
++		// flag, which the render/HUD guards use instead of "gent->client is null").
++		// The host never enters this branch, so the cvar stays 0 there.
++		Cvar_Set( "cg_remoteClient", "1" );
++
++		GetCGameAPIProc *GetCGameAPI = NULL;
++		cl_cgame_library = Sys_LoadSPGameDll( "jospgame", (GetGameAPIProc **)&GetCGameAPI );
++		// Sys_LoadSPGameDll resolves "GetGameAPI"; we need "GetCGameAPI".
++		if ( cl_cgame_library ) {
++			GetCGameAPI = (GetCGameAPIProc *)Sys_LoadFunction( cl_cgame_library, "GetCGameAPI" );
++		}
++		if ( !cl_cgame_library || !GetCGameAPI ) {
++			Com_Error( ERR_DROP, "dual-load: failed to load jospgame / GetCGameAPI" );
++		}
++
++		game_import_t import;
++		CL_BuildCGameImport( import );
++		GetCGameAPI( &import );
++
++		if ( !CL_InitCGameVM( cl_cgame_library ) ) {
++			Com_Error( ERR_DROP, "dual-load: CL_InitCGameVM failed" );
++		}
++	} else {
++		Com_DPrintf( "^5dual-load: host path, cgame already initialised (branch skipped)\n" );	// A3 probe (temporary)
++	}
++
+ 	// init for this gamestate
+ 	VM_Call( CG_INIT, clc.serverCommandSequence );
+ 
+diff --git a/code/rd-common/tr_public.h b/code/rd-common/tr_public.h
+index a0f0ace4..76d61d2b 100644
+--- a/code/rd-common/tr_public.h
++++ b/code/rd-common/tr_public.h
+@@ -190,6 +190,10 @@ typedef struct {
+ 		float s1, float t1, float s2, float t2, float a1, qhandle_t hShader );	// 0 = white
+ 	void	(*DrawRotatePic2) ( float x, float y, float w, float h,
+ 		float s1, float t1, float s2, float t2, float a1, qhandle_t hShader );	// 0 = white
++	// Widescreen HUD edge anchoring: qtrue makes subsequently recorded 2D pics
++	// replay under a full-width edge-anchored ortho instead of the pillarboxed 4:3
++	// one, so corner HUD widgets can ride the true screen edges on ultrawide.
++	void	(*Set2DWide)( qboolean wide );
+ 	void	(*LAGoggles)(void);
+ 	void	(*Scissor) ( float x, float y, float w, float h);	// 0 = white
+ 
+diff --git a/code/rd-vanilla/tr_backend.cpp b/code/rd-vanilla/tr_backend.cpp
+index 741bb95b..b5693e7a 100644
+--- a/code/rd-vanilla/tr_backend.cpp
++++ b/code/rd-vanilla/tr_backend.cpp
+@@ -972,15 +972,65 @@ RB_SetGL2D
+ 
+ ================
+ */
+-void	RB_SetGL2D (void) {
++void	RB_SetGL2D ( qboolean wide ) {
+ 	backEnd.projection2D = qtrue;
++	backEnd.current2Dwide = wide;
++
++	// The 2D HUD and menus are authored in a fixed 640x480 (4:3) virtual space.
++	// Stretching that across a wider framebuffer distorts every element, which
++	// is very visible on 16:9 and severe on 21:9 ultrawide. Instead, map the
++	// 640x480 virtual space to a centred 4:3 region of the framebuffer and leave
++	// the extra width as black pillarbox bars, so 2D art keeps its intended
++	// shape. The 3D world view still fills the screen (its FOV is widened
++	// separately by cg_fovAspectAdjust). r_aspectCorrect2D disables this to
++	// restore the legacy full-width stretch.
++	//
++	// The corner HUD widgets, however, should ride the true screen edges rather
++	// than the pillarbox band. When a draw command is flagged `wide` the HUD code
++	// (CG_DrawHUD) has already shifted its X coordinates into the former bars, so
++	// here we map the 640x480 space across the full framebuffer with square pixels
++	// by widening the horizontal ortho extent symmetrically. Virtual X then runs
++	// [-halfExtra, 640+halfExtra] edge to edge, so a widget shifted to virtual
++	// -halfExtra lands exactly at the left screen edge. Only meaningful when the
++	// framebuffer is wider than 4:3 and aspect correction is on; otherwise the
++	// wide path is identical to the normal path.
++	int x = 0, y = 0, w = glConfig.vidWidth, h = glConfig.vidHeight;
++	float orthoLeft = 0.0f, orthoRight = 640.0f;
++	if ( r_aspectCorrect2D && r_aspectCorrect2D->integer && glConfig.vidHeight > 0 )
++	{
++		const float aspect = (float)glConfig.vidWidth / (float)glConfig.vidHeight;
++		const float target = 640.0f / 480.0f;
++		if ( aspect > target )
++		{
++			if ( wide )
++			{
++				// edge-anchored HUD: fill the width, widen the ortho so pixels stay square
++				const float halfExtra = ( 640.0f * ( aspect / target ) - 640.0f ) * 0.5f;
++				orthoLeft = -halfExtra;
++				orthoRight = 640.0f + halfExtra;
++			}
++			else
++			{
++				// too wide: pillarbox (bars left and right)
++				w = (int)( glConfig.vidHeight * target + 0.5f );
++				x = ( glConfig.vidWidth - w ) / 2;
++			}
++		}
++		else if ( aspect < target )
++		{
++			// too tall: letterbox (bars top and bottom). Nothing to widen, so the
++			// wide flag is a no-op here and falls through to the pillarboxed path.
++			h = (int)( glConfig.vidWidth / target + 0.5f );
++			y = ( glConfig.vidHeight - h ) / 2;
++		}
++	}
+ 
+ 	// set 2D virtual screen size
+-	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+-	qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
++	qglViewport( x, y, w, h );
++	qglScissor( x, y, w, h );
+ 	qglMatrixMode(GL_PROJECTION);
+     qglLoadIdentity ();
+-	qglOrtho (0, 640, 480, 0, 0, 1);
++	qglOrtho (orthoLeft, orthoRight, 480, 0, 0, 1);
+ 	qglMatrixMode(GL_MODELVIEW);
+     qglLoadIdentity ();
+ 
+@@ -1028,8 +1078,14 @@ const void *RB_StretchPic ( const void *data ) {
+ 
+ 	cmd = (const stretchPicCommand_t *)data;
+ 
+-	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++	// Re-program the 2D ortho when entering 2D or when this command wants a
++	// different ortho than the one currently set. Verts already batched belong to
++	// the previous projection, so flush them before switching.
++	if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++		if ( tess.numIndexes ) {
++			RB_EndSurface();
++		}
++		RB_SetGL2D( (qboolean)cmd->wide );
+ 	}
+ 
+ 	shader = cmd->shader;
+@@ -1107,8 +1163,11 @@ const void *RB_RotatePic ( const void *data )
+ 
+ 	shader = cmd->shader;
+ 
+-	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++	if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++		if ( tess.numIndexes ) {
++			RB_EndSurface();
++		}
++		RB_SetGL2D( (qboolean)cmd->wide );
+ 	}
+ 
+ 	shader = cmd->shader;
+@@ -1198,8 +1257,11 @@ const void *RB_RotatePic2 ( const void *data )
+ 	// FIXME is this needed
+ 	if ( shader->numUnfoggedPasses )
+ 	{
+-		if ( !backEnd.projection2D ) {
+-			RB_SetGL2D();
++		if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++			if ( tess.numIndexes ) {
++				RB_EndSurface();
++			}
++			RB_SetGL2D( (qboolean)cmd->wide );
+ 		}
+ 
+ 		shader = cmd->shader;
+@@ -1286,7 +1348,7 @@ const void *RB_Scissor ( const void *data )
+ 
+ 	if ( !backEnd.projection2D )
+ 	{
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 
+ 	if (cmd->x >= 0)
+@@ -1478,7 +1540,7 @@ void RB_ShowImages( void ) {
+ 	//int		start, end;
+ 
+ 	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 
+ 	qglFinish();
+diff --git a/code/rd-vanilla/tr_cmds.cpp b/code/rd-vanilla/tr_cmds.cpp
+index 04ad9bdb..a1dc759e 100644
+--- a/code/rd-vanilla/tr_cmds.cpp
++++ b/code/rd-vanilla/tr_cmds.cpp
+@@ -26,6 +26,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
+ 
+ #include "tr_local.h"
+ 
++// Widescreen HUD edge anchoring. When non-zero, the next recorded 2D draw
++// commands are tagged to replay under the full-width edge-anchored ortho instead
++// of the pillarboxed 4:3 one. Toggled by the cgame around the corner HUD paint via
++// the Set2DWide export, and copied onto each command so the flag survives into the
++// deferred backend replay (a plain cvar cannot, as it is read after cgame returns).
++int	r_2Dwide = 0;
+ 
+ /*
+ =====================
+@@ -246,6 +252,7 @@ void RE_StretchPic ( float x, float y, float w, float h,
+ 	cmd->t1 = t1;
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
++	cmd->wide = r_2Dwide;
+ }
+ 
+ /*
+@@ -275,6 +282,7 @@ void RE_RotatePic ( float x, float y, float w, float h,
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
+ 	cmd->a = a;
++	cmd->wide = r_2Dwide;
+ }
+ 
+ /*
+@@ -305,6 +313,21 @@ void RE_RotatePic2 ( float x, float y, float w, float h,
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
+ 	cmd->a = a;
++	cmd->wide = r_2Dwide;
++}
++
++/*
++=============
++RE_Set2DWide
++
++Select which 2D ortho subsequently recorded stretch/rotate-pic commands replay
++under: qtrue = full-width edge-anchored (widescreen HUD), qfalse = pillarboxed
++4:3. The flag is stored per command, so the on/off brackets the cgame records
++around the HUD paint are honoured in order at backend replay.
++=============
++*/
++void RE_Set2DWide( qboolean wide ) {
++	r_2Dwide = wide ? 1 : 0;
+ }
+ 
+ void RE_LAGoggles( void )
+diff --git a/code/rd-vanilla/tr_draw.cpp b/code/rd-vanilla/tr_draw.cpp
+index c67c5d0a..56941757 100644
+--- a/code/rd-vanilla/tr_draw.cpp
++++ b/code/rd-vanilla/tr_draw.cpp
+@@ -119,10 +119,10 @@ void RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *
+ 	}
+ 
+ 
+-	extern void	RB_SetGL2D (void);
++	extern void	RB_SetGL2D ( qboolean wide );
+ 	if (!backEnd.projection2D)
+ 	{
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 	qglColor3f( tr.identityLight, tr.identityLight, tr.identityLight );
+ 
+@@ -498,8 +498,8 @@ qboolean RE_ProcessDissolve(void)
+ 
+ 		if (iDissolvePercentage <= 100)
+ 		{
+-			extern void	RB_SetGL2D (void);
+-			RB_SetGL2D();
++			extern void	RB_SetGL2D ( qboolean wide );
++			RB_SetGL2D( qfalse );
+ 
+ //			GLdouble glD;
+ //			qglGetDoublev(GL_DEPTH_CLEAR_VALUE,&glD);
+diff --git a/code/rd-vanilla/tr_init.cpp b/code/rd-vanilla/tr_init.cpp
+index 13c72e66..f0bb0622 100644
+--- a/code/rd-vanilla/tr_init.cpp
++++ b/code/rd-vanilla/tr_init.cpp
+@@ -45,6 +45,8 @@ cvar_t	*r_detailTextures;
+ 
+ cvar_t	*r_znear;
+ 
++cvar_t	*r_aspectCorrect2D;
++
+ cvar_t	*r_skipBackEnd;
+ 
+ cvar_t	*r_measureOverdraw;
+@@ -135,6 +137,7 @@ cvar_t	*r_subdivisions;
+ cvar_t	*r_lodCurveError;
+ 
+ cvar_t	*r_overBrightBits;
++cvar_t	*r_overBrightBitsSoftware;
+ cvar_t	*r_mapOverBrightBits;
+ 
+ cvar_t	*r_debugSurface;
+@@ -247,8 +250,8 @@ void R_Splash()
+ 	}
+ 	else
+ 	{
+-		extern void	RB_SetGL2D (void);
+-		RB_SetGL2D();
++		extern void	RB_SetGL2D ( qboolean wide );
++		RB_SetGL2D( qfalse );
+ 
+ 		GL_Bind( pImage );
+ 		GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO);
+@@ -1537,6 +1540,17 @@ void R_Register( void )
+ 	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_texturebitslm = ri.Cvar_Get( "r_texturebitslm", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
++	// coop render fidelity: allow overbright without a hardware gamma ramp.
++	// The classic path (below, in R_SetColorMappings) forces overbright off
++	// whenever the OS can't hand us a hardware gamma ramp (Wayland, most
++	// compositors) or we're windowed/borderless -- which is the common case on
++	// modern setups, leaving world/model lighting flat and dark. When this is
++	// set, we keep overbright active and let the software gamma-table path
++	// (R_LightScaleTexture, which already bakes s_gammatable -- including the
++	// overbright << shift -- into textures and lightmaps at upload time when no
++	// hardware gamma exists) deliver the punch instead. Latched: textures are
++	// scaled at load, so it only takes effect on a vid_restart.
++	r_overBrightBitsSoftware = ri.Cvar_Get ("r_overBrightBitsSoftware", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "0", CVAR_ARCHIVE_ND|CVAR_LATCH );
+ 	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
+ 	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
+@@ -1561,6 +1575,7 @@ void R_Register( void )
+ 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_ARCHIVE_ND );	//if set any lower, you lose a lot of precision in the distance
+ 	ri.Cvar_CheckRange( r_znear, 0.001f, 10, qfalse ); // was qtrue in JA, is qfalse properly in ioq3
+ 	r_ignoreGLErrors = ri.Cvar_Get( "r_ignoreGLErrors", "1", CVAR_ARCHIVE_ND );
++	r_aspectCorrect2D = ri.Cvar_Get( "r_aspectCorrect2D", "1", CVAR_ARCHIVE );
+ 	r_fastsky = ri.Cvar_Get( "r_fastsky", "0", CVAR_ARCHIVE_ND );
+ 	r_drawSun = ri.Cvar_Get( "r_drawSun", "0", CVAR_ARCHIVE_ND );
+ 	r_dynamiclight = ri.Cvar_Get( "r_dynamiclight", "1", CVAR_ARCHIVE );
+@@ -2026,6 +2041,7 @@ extern "C" Q_EXPORT refexport_t* QDECL GetRefAPI ( int apiVersion, refimport_t *
+ 	re.DrawStretchPic = RE_StretchPic;
+ 	re.DrawRotatePic = RE_RotatePic;
+ 	re.DrawRotatePic2 = RE_RotatePic2;
++	REX(Set2DWide);
+ 	REX(LAGoggles);
+ 	REX(Scissor);
+ 
+diff --git a/code/rd-vanilla/tr_local.h b/code/rd-vanilla/tr_local.h
+index c9e745aa..4a5011c8 100644
+--- a/code/rd-vanilla/tr_local.h
++++ b/code/rd-vanilla/tr_local.h
+@@ -939,6 +939,7 @@ typedef struct {
+ 	qboolean	skyRenderedThisView;	// flag for drawing sun
+ 
+ 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
++	qboolean	current2Dwide;	// which 2D ortho is programmed: qtrue = full-width edge-anchored, qfalse = pillarboxed 4:3
+ 	byte		color2D[4];
+ 	qboolean	vertexes2D;		// shader needs to be finished
+ 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
+@@ -1088,6 +1089,8 @@ extern cvar_t	*r_verbose;				// used for verbose debug spew
+ 
+ extern cvar_t	*r_znear;				// near Z clip plane
+ 
++extern cvar_t	*r_aspectCorrect2D;		// pillarbox the 2D HUD/menus at aspect ratios wider than 4:3
++
+ extern cvar_t	*r_stencilbits;			// number of desired stencil bits
+ extern cvar_t	*r_depthbits;			// number of desired depth bits
+ extern cvar_t	*r_colorbits;			// number of desired color bits, only relevant for fullscreen
+@@ -1203,6 +1206,7 @@ extern	cvar_t	*r_skipBackEnd;
+ extern	cvar_t	*r_ignoreGLErrors;
+ 
+ extern	cvar_t	*r_overBrightBits;
++extern	cvar_t	*r_overBrightBitsSoftware;
+ extern	cvar_t	*r_mapOverBrightBits;
+ 
+ extern	cvar_t	*r_debugSurface;
+@@ -1735,6 +1739,7 @@ typedef struct {
+ 	float	w, h;
+ 	float	s1, t1;
+ 	float	s2, t2;
++	int		wide;	// 1 = draw under the full-width edge-anchored 2D ortho (widescreen HUD), 0 = pillarboxed 4:3
+ } stretchPicCommand_t;
+ 
+ typedef struct {
+@@ -1745,6 +1750,7 @@ typedef struct {
+ 	float	s1, t1;
+ 	float	s2, t2;
+ 	float	a;
++	int		wide;	// 1 = draw under the full-width edge-anchored 2D ortho (widescreen HUD), 0 = pillarboxed 4:3
+ } rotatePicCommand_t;
+ 
+ typedef struct
+@@ -1813,6 +1819,7 @@ void RE_RotatePic ( float x, float y, float w, float h,
+ 					  float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
+ void RE_RotatePic2 ( float x, float y, float w, float h,
+ 					  float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
++void RE_Set2DWide( qboolean wide );
+ void RE_RenderWorldEffects(void);
+ void RE_LAGoggles( void );
+ void RE_Scissor ( float x, float y, float w, float h);
+diff --git a/codeJK2/cgame/cg_draw.cpp b/codeJK2/cgame/cg_draw.cpp
+index d0a0df66..759243cc 100644
+--- a/codeJK2/cgame/cg_draw.cpp
++++ b/codeJK2/cgame/cg_draw.cpp
+@@ -286,16 +286,22 @@ static void CG_DrawForcePower(centity_t *cent,int x,int y)
+ 	vec4_t		calcColor;
+ 	float		value,extra=0,inc,percent;
+ 
+-	if ( !cent->gent->client->ps.forcePowersKnown )
++	// dual-load: on a serverless remote client cent->gent->client is null for
++	// the local player; the same force-power fields live in the received
++	// snapshot playerstate. Use the gent's ps when present (host), else the
++	// snapshot's (remote client).
++	const playerState_t	*ps = ( !cg_remoteClient && cent->gent && cent->gent->client ) ? &cent->gent->client->ps : &cg.snap->ps;
++
++	if ( !ps->forcePowersKnown )
+ 	{
+ 		return;
+ 	}
+-	inc = (float)  cent->gent->client->ps.forcePowerMax / MAX_TICS;
+-	value = cent->gent->client->ps.forcePower;
+-	if ( value > cent->gent->client->ps.forcePowerMax )
++	inc = (float)  ps->forcePowerMax / MAX_TICS;
++	value = ps->forcePower;
++	if ( value > ps->forcePowerMax )
+ 	{//supercharged with force
+-		extra = value - cent->gent->client->ps.forcePowerMax;
+-		value = cent->gent->client->ps.forcePowerMax;
++		extra = value - ps->forcePowerMax;
++		value = ps->forcePowerMax;
+ 	}
+ 
+ 	for (i=MAX_TICS-1;i>=0;i--)
+@@ -303,7 +309,7 @@ static void CG_DrawForcePower(centity_t *cent,int x,int y)
+ 		if ( extra )
+ 		{//supercharged
+ 			memcpy(calcColor, colorTable[CT_WHITE], sizeof(vec4_t));
+-			percent = 0.75f + (sin( cg.time * 0.005f )*((extra/cent->gent->client->ps.forcePowerMax)*0.25f));
++			percent = 0.75f + (sin( cg.time * 0.005f )*((extra/ps->forcePowerMax)*0.25f));
+ 			calcColor[0] *= percent;
+ 			calcColor[1] *= percent;
+ 			calcColor[2] *= percent;
+@@ -365,7 +371,7 @@ static void CG_DrawAmmo(centity_t	*cent,int x,int y)
+ 	{
+ 		cgi_R_SetColor( colorTable[CT_WHITE] );
+ 
+-		if ( !cg.saberAnimLevelPending && cent->gent->client )
++		if ( !cg.saberAnimLevelPending && !cg_remoteClient && cent->gent->client )
+ 		{//uninitialized after a loadgame, cheat across and get it
+ 			cg.saberAnimLevelPending = cent->gent->client->ps.saberAnimLevel;
+ 		}
+@@ -745,12 +751,58 @@ CG_DrawHUD
+ */
+ extern void *cgi_UI_GetMenuByName( const char *menu );
+ extern void cgi_UI_Menu_Paint( void *menu, qboolean force );
++/*
++================
++CG_HUDEdgeShift
++
++Widescreen HUD edge anchoring. On a framebuffer wider than 4:3, r_aspectCorrect2D
++pillarboxes the 2D layer, which rides the corner HUD widgets inboard with the
++pillarbox band. Return the number of 640-space virtual pixels to shift each side
++outward so the widgets sit at the true screen edges instead: left widgets by
++-shift, right widgets by +shift. Returns 0 when there is nothing to anchor
++(cg_hudEdgeAnchor off, non-widescreen, or a square/tall display), in which case
++the caller leaves the HUD pillarboxed and never flags the draws wide.
++================
++*/
++float CG_HUDEdgeShift( void )
++{
++	if ( !cg_hudEdgeAnchor.integer )
++	{
++		return 0.0f;
++	}
++	if ( cgs.glconfig.vidHeight <= 0 )
++	{
++		return 0.0f;
++	}
++	const float aspect = (float)cgs.glconfig.vidWidth / (float)cgs.glconfig.vidHeight;
++	const float target = 640.0f / 480.0f;
++	if ( aspect <= target )
++	{
++		return 0.0f;	// square or tall: the 2D layer is not pillarboxed horizontally
++	}
++	// Half of the extra virtual width the full-width ortho exposes on each side.
++	// A widget shifted by this lands exactly at the screen edge under RB_SetGL2D's
++	// wide ortho, whose virtual X runs [-halfExtra, 640+halfExtra].
++	return ( 640.0f * ( aspect / target ) - 640.0f ) * 0.5f;
++}
++
+ static void CG_DrawHUD( centity_t *cent )
+ {
+ 	int x,y,value;
++	const float hudShift = CG_HUDEdgeShift();
++	const qboolean wide = ( hudShift > 0.5f ) ? qtrue : qfalse;
+ 
+ 	if (cgi_UI_GetMenuInfo("lefthud",&x,&y))
+ 	{
++		// Anchor the left cluster to the true left edge on widescreen. The lefthud
++		// menu itself defines only a rect (no items), so nothing paints under the
++		// wide flag that we don't also shift here.
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qtrue );
++			x -= (int)( hudShift + 0.5f );
++		}
++
+ 		// Draw all the HUD elements --eez
+ 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "lefthud" ), qtrue );
+ 
+@@ -765,10 +817,22 @@ static void CG_DrawHUD( centity_t *cent )
+ 		CG_DrawArmor(x,y);
+ 		CG_DrawHealth(x,y);
+ 		CG_DrawHUDLeftFrame2(x,y);
++
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qfalse );
++		}
+ 	}
+ 
+ 	if (cgi_UI_GetMenuInfo("righthud",&x,&y))
+ 	{
++		// Anchor the right cluster to the true right edge on widescreen.
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qtrue );
++			x += (int)( hudShift + 0.5f );
++		}
++
+ 		// Draw all the HUD elements --eez
+ 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "righthud" ), qtrue );
+ 
+@@ -787,7 +851,7 @@ static void CG_DrawHUD( centity_t *cent )
+ //				value = cg.snap->ps.ammo[weaponData[cent->currentState.weapon].ammoIndex];
+ 			}
+ //			CG_DrawSmallStringColor(x, y - 60,va("Ammo:%d",value), colorTable[CT_HUD_GREEN] );
+-			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",cent->gent->client->ps.forcePower), colorTable[CT_HUD_GREEN] );
++			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",( !cg_remoteClient && cent->gent && cent->gent->client ) ? cent->gent->client->ps.forcePower : cg.snap->ps.forcePower), colorTable[CT_HUD_GREEN] );
+ 		}
+ 
+ 		CG_DrawHUDRightFrame1(x,y);
+@@ -795,6 +859,11 @@ static void CG_DrawHUD( centity_t *cent )
+ 		CG_DrawAmmo(cent,x,y);
+ 		CG_DrawMessageLit(cent,x,y);
+ 		CG_DrawHUDRightFrame2(x,y);
++
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qfalse );
++		}
+ 	}
+ }
+ 
+@@ -1148,7 +1217,10 @@ static void CG_DrawZoomMask( void )
+ 
+ 			CG_DrawPic( 570, 140, 12, 160, cgs.media.laGogglesSideBit );
+ 
+-			float light = (128-cent->gent->lightLevel) * 0.5f;
++			// dual-load: lightLevel is a server-computed gentity field with no
++			// snapshot equivalent; on a remote client without a gent, treat it
++			// as 0 (full brightness through the goggles).
++			float light = (128-( cent->gent ? cent->gent->lightLevel : 0 )) * 0.5f;
+ 
+ 			if ( light < -81 ) // saber can really jack up local light levels....?magic number??
+ 			{
+@@ -1692,7 +1764,11 @@ static void CG_ScanForCrosshairEntity( qboolean scanAll )
+ 	//FIXME: debounce this to about 10fps?
+ 
+ 	cg_forceCrosshair = qfalse;
+-	if ( cg_entities[0].gent && cg_entities[0].gent->client ) // <-Mike said it should always do this   //if (cg_crosshairForceHint.integer &&
++	// dual-load: this force-crosshair hint traces from g_entities[0]'s server
++	// renderInfo.eyePoint, which is empty for the local player on a remote client
++	// (M3 allocates the client but leaves it zeroed). Gate on !cg_remoteClient so
++	// the remote client skips the hint rather than trace from a zero eyePoint.
++	if ( !cg_remoteClient && cg_entities[0].gent && cg_entities[0].gent->client ) // <-Mike said it should always do this   //if (cg_crosshairForceHint.integer &&
+ 	{//try to check for force-affectable stuff first
+ 		vec3_t d_f, d_rt, d_up;
+ 
+@@ -1782,7 +1858,13 @@ static void CG_ScanForCrosshairEntity( qboolean scanAll )
+ 	}
+ 	if ( !cg_forceCrosshair )
+ 	{
+-		if ( cg_dynamicCrosshair.integer )
++		// dual-load: the "100% accurate" path traces from the local player's
++		// gentity (g_entities[0].client->renderInfo, CalcMuzzlePoint) — server
++		// state that is not meaningfully populated on a serverless remote client
++		// (M3 allocates the client struct but it stays zeroed for the local
++		// player). Gate on !cg_remoteClient so the remote client falls through to
++		// the view-origin path below, which is snapshot-derived and valid on both.
++		if ( cg_dynamicCrosshair.integer && !cg_remoteClient && g_entities[0].client )
+ 		{//100% accurate
+ 			vec3_t d_f, d_rt, d_up;
+ 			if ( cg.snap->ps.weapon == WP_NONE ||
+diff --git a/codeJK2/cgame/cg_local.h b/codeJK2/cgame/cg_local.h
+index 67946c5d..4194f829 100644
+--- a/codeJK2/cgame/cg_local.h
++++ b/codeJK2/cgame/cg_local.h
+@@ -540,12 +540,16 @@ typedef struct
+ 
+ 
+ extern	cg_t			cg;
++// M3: true on a serverless remote client (dual-loaded cgame, no local server).
++// The render/HUD guards use this instead of client-pointer nullness.
++extern	qboolean		cg_remoteClient;
+ extern	centity_t		cg_entities[MAX_GENTITIES];
+ extern	weaponInfo_t	cg_weapons[MAX_WEAPONS];
+ extern	itemInfo_t		cg_items[MAX_ITEMS];
+ extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
+ 
+ 
++extern	vmCvar_t		cg_remoteClientCvar;	// M3: mirrors engine cg_remoteClient
+ extern	vmCvar_t		cg_centertime;
+ extern	vmCvar_t		cg_runpitch;
+ extern	vmCvar_t		cg_runroll;
+@@ -569,6 +573,7 @@ extern	vmCvar_t		cg_crosshairSize;
+ extern	vmCvar_t		cg_drawStatus;
+ extern	vmCvar_t		cg_drawHUD;
+ extern	vmCvar_t		cg_draw2D;
++extern	vmCvar_t		cg_hudEdgeAnchor;
+ extern	vmCvar_t		cg_animSpeed;
+ extern	vmCvar_t		cg_debugAnim;
+ extern	vmCvar_t		cg_debugSaber;
+@@ -587,6 +592,7 @@ extern	vmCvar_t		cg_autoswitch;
+ extern	vmCvar_t		cg_simpleItems;
+ extern	vmCvar_t		cg_fov;
+ extern	vmCvar_t		cg_fovAspectAdjust;
++extern	vmCvar_t		cg_fovSensitivityScale;
+ extern	vmCvar_t		cg_fovViewmodel;
+ extern	vmCvar_t		cg_fovViewmodelAdjust;
+ extern	vmCvar_t		cg_missionstatusscreen;
+@@ -1032,6 +1038,12 @@ void	cgi_R_DrawRotatePic2( float x, float y, float w, float h,
+ 	float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
+ void	cgi_R_LAGoggles( void );
+ void	cgi_R_Scissor( float x, float y, float w, float h);
++void	cgi_R_Set2DWide( qboolean wide );
++
++// Widescreen HUD edge anchoring: 640-space pixels to shift a corner widget
++// outward (left widgets by -shift, right by +shift) so it rides the true screen
++// edge; 0 when there is nothing to anchor. See CG_DrawHUD / CG_DrawIconBackground.
++float	CG_HUDEdgeShift( void );
+ 
+ // The glconfig_t will not change during the life of a cgame.
+ // If it needs to change, the entire cgame will be restarted, because
+diff --git a/codeJK2/cgame/cg_main.cpp b/codeJK2/cgame/cg_main.cpp
+index 9be003e9..d4826683 100644
+--- a/codeJK2/cgame/cg_main.cpp
++++ b/codeJK2/cgame/cg_main.cpp
+@@ -219,6 +219,13 @@ Ghoul2 Insert End
+ 
+ cg_t				cg;
+ cgs_t				cgs;
++// M3: true when this cgame runs on a serverless remote client (dual-loaded, no
++// local server gentities). Set from the cg_remoteClient cvar in CG_Init. The
++// render/HUD guards use this instead of "the local player's gent->client is
++// null" as the remote-client sentinel, because M3 allocates those client
++// structures on the remote client (so client-nullness no longer distinguishes
++// host from remote).
++qboolean			cg_remoteClient = qfalse;
+ centity_t			cg_entities[MAX_GENTITIES];
+ weaponInfo_t		cg_weapons[MAX_WEAPONS];
+ itemInfo_t			cg_items[MAX_ITEMS];
+@@ -241,6 +248,7 @@ vmCvar_t	cg_bobpitch;
+ vmCvar_t	cg_bobroll;
+ vmCvar_t	cg_swingSpeed;
+ vmCvar_t	cg_shadows;
++vmCvar_t	cg_remoteClientCvar;	// M3: mirrors the engine's cg_remoteClient cvar
+ vmCvar_t	cg_paused;
+ vmCvar_t	cg_drawTimer;
+ vmCvar_t	cg_drawFPS;
+@@ -276,6 +284,8 @@ vmCvar_t	cg_autoswitch;
+ vmCvar_t	cg_simpleItems;
+ vmCvar_t	cg_fov;
+ vmCvar_t	cg_fovAspectAdjust;
++vmCvar_t	cg_fovSensitivityScale;
++vmCvar_t	cg_hudEdgeAnchor;
+ vmCvar_t	cg_missionstatusscreen;
+ vmCvar_t	cg_endcredits;
+ vmCvar_t	cg_updatedDataPadForcePower1;
+@@ -342,6 +352,8 @@ static cvarTable_t cvarTable[] = {
+ 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
+ 	{ &cg_fov, "cg_fov", "80", CVAR_ARCHIVE },
+ 	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "0", CVAR_ARCHIVE },
++	{ &cg_hudEdgeAnchor, "cg_hudEdgeAnchor", "1", CVAR_ARCHIVE },	// 1 = anchor corner HUD to true screen edges on widescreen; 0 = keep it pillarboxed
++	{ &cg_fovSensitivityScale, "cg_fovSensitivityScale", "0", CVAR_ARCHIVE },	// 0 = mouse sensitivity is FOV-independent (modern); 1 = legacy JK2 behavior (sensitivity scales with fov_y/75)
+ 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
+ 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
+ 
+@@ -353,7 +365,7 @@ static cvarTable_t cvarTable[] = {
+ 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
+ 	{ &cg_drawAmmoWarning, "cg_drawAmmoWarning", "1", CVAR_ARCHIVE  },
+ 	{ &cg_drawCrosshair, "cg_drawCrosshair", "1", CVAR_ARCHIVE },
+-	{ &cg_dynamicCrosshair, "cg_dynamicCrosshair", "1", CVAR_ARCHIVE },
++	{ &cg_dynamicCrosshair, "cg_dynamicCrosshair", "0", CVAR_ARCHIVE },	// 0 = fixed screen-center crosshair (modern, no drift). 1 = legacy dynamic crosshair traced from the moving weapon muzzle along smoothed lerp-angles, which visibly lags/drifts behind the view.
+ 	{ &cg_crosshairIdentifyTarget, "cg_crosshairIdentifyTarget", "1", CVAR_ARCHIVE },
+ 	{ &cg_crosshairForceHint, "cg_crosshairForceHint", "1", CVAR_ARCHIVE|CVAR_SAVEGAME|CVAR_NORESTART },
+ 	{ &cg_missionstatusscreen, "cg_missionstatusscreen", "0", CVAR_ROM},
+@@ -438,6 +450,9 @@ Ghoul2 Insert End
+ 	{ &cg_smoothPlayerPos, "cg_smoothPlayerPos", "0.5", 0},
+ 	{ &cg_smoothPlayerPlat, "cg_smoothPlayerPlat", "0.75", 0},
+ 	{ &cg_smoothPlayerPlatAccel, "cg_smoothPlayerPlatAccel", "3.25", 0},
++	// M3: set to 1 by CL_InitCGame's dual-load branch on the serverless remote
++	// client; 0 on the host. Read once in CG_Init into the cg_remoteClient flag.
++	{ &cg_remoteClientCvar, "cg_remoteClient", "0", CVAR_ROM },
+ };
+ 
+ static const size_t cvarTableSize = ARRAY_LEN( cvarTable );
+@@ -633,10 +648,17 @@ static void CG_AS_Register(void)
+ 
+ 	cgi_AS_AddPrecacheEntry( "#clear" );	// ;-)
+ 	//FIXME: Don't ask... I had to get around a really nasty MS error in the templates with this...
+-	namePrecache_m::iterator	pi;
+-	STL_ITERATE( pi, (*as_preCacheMap) )
++	// dual-load: as_preCacheMap is filled by the server game while spawning
++	// entities (g_spawn.cpp). A serverless remote client spawns nothing
++	// locally, so the map is null; skip the precache-name loop but still let
++	// cgi_AS_ParseSets() run — ambient sets then register lazily on use.
++	if ( as_preCacheMap )
+ 	{
+-		cgi_AS_AddPrecacheEntry( ((*pi).first).c_str() );
++		namePrecache_m::iterator	pi;
++		STL_ITERATE( pi, (*as_preCacheMap) )
++		{
++			cgi_AS_AddPrecacheEntry( ((*pi).first).c_str() );
++		}
+ 	}
+ 
+ 	cgi_AS_ParseSets();
+@@ -1469,7 +1491,12 @@ Ghoul2 Insert End
+ 
+ 	extern	cvar_t	*com_buildScript;
+ 
+-	if (com_buildScript->integer) {
++	// dual-load: com_buildScript is the game library's own cvar global, set in
++	// InitGame via gi.cvar. A serverless remote client never runs InitGame, so
++	// the pointer is null here. Guard it the same way the engine does at
++	// common.cpp:296 — it is a build-time asset-precache flag, always 0 at
++	// runtime, so skipping the block on the client changes nothing.
++	if (com_buildScript && com_buildScript->integer) {
+ 		cgi_R_RegisterShader( "gfx/misc/nav_cpoint" );
+ 		cgi_R_RegisterShader( "gfx/misc/nav_line" );
+ 		cgi_R_RegisterShader( "gfx/misc/nav_arrow" );
+@@ -1713,6 +1740,11 @@ Ghoul2 Insert End
+ 
+ 	CG_RegisterCvars();
+ 
++	// M3: latch the remote-client flag from the cvar the engine set in the
++	// dual-load branch. Guards downstream use cg_remoteClient (not client-pointer
++	// nullness) to tell host from serverless remote client.
++	cg_remoteClient = (qboolean)( cg_remoteClientCvar.integer != 0 );
++
+ //moved from CG_GameStateReceived because it's loaded sooner now
+ 	CG_InitLocalEntities();
+ 
+diff --git a/codeJK2/cgame/cg_public.h b/codeJK2/cgame/cg_public.h
+index 7a8d78f8..3e5f8484 100644
+--- a/codeJK2/cgame/cg_public.h
++++ b/codeJK2/cgame/cg_public.h
+@@ -198,6 +198,8 @@ Ghoul2 Insert End
+ 
+ 	CG_OPENJK_MENU_PAINT,
+ 	CG_OPENJK_GETMENU_BYNAME,
++
++	CG_R_SET2DWIDE,		// widescreen HUD edge anchoring
+ } cgameImport_t;
+ 
+ //----------------------------------------------
+diff --git a/codeJK2/cgame/cg_syscalls.cpp b/codeJK2/cgame/cg_syscalls.cpp
+index d1b2d1be..068d4626 100644
+--- a/codeJK2/cgame/cg_syscalls.cpp
++++ b/codeJK2/cgame/cg_syscalls.cpp
+@@ -345,6 +345,11 @@ void	cgi_R_Scissor( float x, float y, float w, float h)
+ 	Q_syscall( CG_R_SCISSOR, PASSFLOAT(x), PASSFLOAT(y), PASSFLOAT(w), PASSFLOAT(h));
+ }
+ 
++void	cgi_R_Set2DWide( qboolean wide )
++{
++	Q_syscall( CG_R_SET2DWIDE, wide );
++}
++
+ void		cgi_GetGlconfig( glconfig_t *glconfig ) {
+ 	Q_syscall( CG_GETGLCONFIG, glconfig );
+ }
+diff --git a/codeJK2/cgame/cg_weapons.cpp b/codeJK2/cgame/cg_weapons.cpp
+index 6bfbbd5a..5586c00e 100644
+--- a/codeJK2/cgame/cg_weapons.cpp
++++ b/codeJK2/cgame/cg_weapons.cpp
+@@ -919,6 +919,19 @@ void CG_AddViewWeapon( playerState_t *ps )
+ 
+ 	cent = &cg_entities[ps->clientNum];
+ 
++	// dual-load: the first-person view weapon is rendered almost entirely from
++	// the local player's server gentity (cent->gent->client->renderInfo, the
++	// ghoul2 model, lowerLumbarBone, force-power state). On a serverless remote
++	// client that gentity state is not populated for the local player (M3
++	// allocates the client struct but the local player's ghoul2/renderInfo stay
++	// empty). Skip the viewmodel rather than fault; the world still renders. A
++	// snapshot-backed local viewmodel is future work. Gate on cg_remoteClient,
++	// not client-pointer nullness (M3 made it non-null). The host keeps its path.
++	if ( cg_remoteClient || !cent->gent || !cent->gent->client )
++	{
++		return;
++	}
++
+ 	if ( ps->eFlags & EF_LOCKED_TO_WEAPON )
+ 	{
+ 		return;
+@@ -1321,6 +1334,15 @@ void CG_DrawIconBackground(void)
+ 		return;
+ 	}
+ 
++	// Widescreen edge anchoring: the two side prongs pair with the corner health
++	// and ammo dials, so shift them out to the true screen edges (left prong by
++	// -shift, right prong by +shift) while the centred icon background arc stays
++	// pillarboxed. hudShift is 0 on 4:3 / when the feature is off, leaving the
++	// original layout untouched.
++	const float hudShift = CG_HUDEdgeShift();
++	const qboolean wide = ( hudShift > 0.5f ) ? qtrue : qfalse;
++	const int prongShift = wide ? (int)( hudShift + 0.5f ) : 0;
++
+ 	prongLeftX =x2+37;
+ 	prongRightX =x2+544;
+ 
+@@ -1364,8 +1386,10 @@ void CG_DrawIconBackground(void)
+ 		}
+ 
+ 		cgi_R_SetColor( colorTable[CT_WHITE] );
+-		CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, cgs.media.weaponProngsOff);
+-		CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, cgs.media.weaponProngsOff);
++		if ( wide ) { cgi_R_Set2DWide( qtrue ); }
++		CG_DrawPic( prongLeftX+xAdd-prongShift, y2-10, 40, 80, cgs.media.weaponProngsOff);
++		CG_DrawPic( prongRightX-xAdd+prongShift, y2-10, -40, 80, cgs.media.weaponProngsOff);
++		if ( wide ) { cgi_R_Set2DWide( qfalse ); }
+ 
+ 		return;
+ 	}
+@@ -1421,8 +1445,10 @@ void CG_DrawIconBackground(void)
+ 	// Side Prongs
+ 	cgi_R_SetColor( colorTable[CT_WHITE]);
+ 	xAdd = (int) 8*cg.iconHUDPercent;
+-	CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, background);
+-	CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, background);
++	if ( wide ) { cgi_R_Set2DWide( qtrue ); }
++	CG_DrawPic( prongLeftX+xAdd-prongShift, y2-10, 40, 80, background);
++	CG_DrawPic( prongRightX-xAdd+prongShift, y2-10, -40, 80, background);
++	if ( wide ) { cgi_R_Set2DWide( qfalse ); }
+ }
+ 
+ int cgi_UI_GetItemText(char *menuFile,char *itemName, char *text);

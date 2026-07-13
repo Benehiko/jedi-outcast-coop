@@ -36,6 +36,35 @@ the console and run `vid_restart` (or restart the game) for it to take effect.
 
 This only affects the 2D layer. The 3D world still fills the whole screen.
 
+### HUD edge anchoring (`cg_hudEdgeAnchor`, default on)
+
+Pillarboxing the 2D layer keeps menus and reticles correctly proportioned, but
+it has one unwanted side effect: the corner HUD widgets (health bottom-left,
+force/ammo bottom-right) ride inboard with the pillarbox band instead of sitting
+at the true screen corners. On a 21:9 or 32:9 display that leaves them floating
+well away from the edges.
+
+With `cg_hudEdgeAnchor 1` the corner HUD clusters are anchored to the real screen
+edges while everything else in the 2D layer — menus, briefings, the crosshair,
+the centre "objective updated" text, scope/binocular masks — stays pillarboxed
+and correctly proportioned. Only the two corner clusters move; their health,
+armor, force, and ammo number readouts follow their frames automatically.
+
+| cvar | default | meaning |
+|---|---|---|
+| `cg_hudEdgeAnchor` | `1` | `1` = anchor the corner HUD to the true screen edges on widescreen. `0` = keep it pillarboxed with the rest of the 2D layer. |
+
+`cg_hudEdgeAnchor` is a **cgame** cvar (archived); it takes effect on the next
+frame, no `vid_restart` needed. It only does anything when `r_aspectCorrect2D`
+is on and the display is wider than 4:3 — on a 4:3 screen, or with aspect
+correction off, there is no pillarbox to escape and the cvar is a no-op.
+
+Under the hood, the corner HUD draws are tagged to replay under a full-width,
+square-pixel 2D projection so the widgets land exactly at the edges without
+stretching. The tag rides each draw command into the deferred render backend, so
+the HUD paint's brief widescreen bracket is honoured even though the 2D command
+list is replayed after the cgame frame returns.
+
 ### Widescreen field of view (`cg_fovAspectAdjust`)
 
 The engine already contains a correct Hor+ FOV adjustment; it is simply off by
@@ -128,15 +157,18 @@ cg_fov 90
 vid_restart
 ```
 
-You get a full-width, correctly-proportioned 3D view with an undistorted HUD
-and menus (pillarboxed to 4:3).
+You get a full-width, correctly-proportioned 3D view; menus stay pillarboxed to
+4:3, and the corner HUD is anchored to the true screen edges (`cg_hudEdgeAnchor`
+is on by default).
 
 ## Notes and limitations
 
-- The 2D layer is genuinely 4:3 art, so pillarbox bars on the sides of menus
-  and the HUD are expected and correct — that is the non-distorting result.
-  A few full-screen cinematic overlays (scope/binocular masks) are part of the
-  same 2D layer and are therefore also pillarboxed.
+- The 2D layer is genuinely 4:3 art, so pillarbox bars on the sides of menus are
+  expected and correct — that is the non-distorting result. A few full-screen
+  cinematic overlays (scope/binocular masks) are part of the same 2D layer and
+  are therefore also pillarboxed. The corner HUD is the one exception: it is
+  anchored to the true screen edges by default (`cg_hudEdgeAnchor`), since its
+  widgets are meant to hug the corners rather than sit inside the 4:3 band.
 - This is an engine/renderer change; it needs no new assets and does not touch
   your game data.
 - Texture resolution is a separate topic — see
