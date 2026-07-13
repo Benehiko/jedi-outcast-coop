@@ -60,6 +60,7 @@ Every subcommand maps 1:1 to one of the original scripts:
 | `jk2coop pk3 sensitivity` | `build-sensitivity-menu-pk3.sh` | Rescales the SP CONTROLS mouse-sensitivity slider into `zz-sensitivity-menu.pk3`. |
 | `jk2coop install` | `install-coop.sh` / `install-coop-macos.sh` / `install-coop.ps1` | Stages the data dir (symlinks + gamecode) and installs the launchers. OS-detected. |
 | `jk2coop install --uninstall` | `… --uninstall` | Removes exactly what the install created (manifest-tracked). |
+| `jk2coop launch` | `jk2coop-host` / `jk2coop-join` | Runs the staged engine: single-player (default), `--host`, or `--join <addr>`. |
 | `jk2coop version` | — | Prints version, commit, and build date. |
 
 Run any command with `--help` for its flags.
@@ -97,6 +98,34 @@ jk2coop install --no-skip-cutscenes   # never auto-skip (suppress the prompt)
 In `modern` mode the install also builds `zz-sensitivity-menu.pk3` so the
 CONTROLS slider can reach the lower modern range (retail min is 2). See
 [modern-combat.md](modern-combat.md).
+
+### Launch flags
+
+`jk2coop launch` runs the same engine `install` staged, with `fs_basepath`
+pointed at the data dir so it picks up the co-op gamecode, the linked retail
+assets, and your `autoexec_*.cfg` presets (combat + render). It subsumes the
+generated `jk2coop-host` / `jk2coop-join` launcher scripts.
+
+```bash
+jk2coop launch                        # single-player, default map (kejim_post), fullscreen
+jk2coop launch --map t2_trip          # single-player, a specific map
+jk2coop launch --windowed             # run windowed instead of fullscreen
+jk2coop launch --skip-cutscenes       # auto-skip scripted map-intro cutscenes this run
+jk2coop launch --host                 # host a co-op game on UDP 29070
+jk2coop launch --host --port 30000    # host on a specific port
+jk2coop launch --join 192.168.1.5     # join (defaults to :29070)
+jk2coop launch --join 192.168.1.5:30000
+jk2coop launch --print                # print the resolved engine command, don't run it
+jk2coop launch -- +set r_mode -2      # pass raw engine args after `--`
+```
+
+On Unix `launch` **replaces** the `jk2coop` process with the engine (via
+`exec`), so the game keeps running under your shell after `jk2coop` would have
+exited. On Windows there is no `exec`; the engine runs as a child and `jk2coop`
+waits for it. If the engine isn't built where it's expected, `launch` errors
+with setup guidance instead of running — build first (see
+[building.md](building.md)) and `jk2coop install`, or point `--build <dir>` at
+your build.
 
 Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 

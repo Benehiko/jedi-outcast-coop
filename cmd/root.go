@@ -30,6 +30,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newPatchesCmd())
 	root.AddCommand(newPk3Cmd())
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newLaunchCmd())
 
 	return root
 }

@@ -68,9 +68,11 @@ files — your game install is never copied from or modified.
 
 The short version on Linux, once built ([docs/building.md](docs/building.md)):
 
-    tools/install-coop.sh              # symlinks your Steam assets + co-op gamecode into place
-    jk2coop-host                       # host a game on UDP 29070
-    jk2coop-join <host-ip>             # join it from another machine
+    jk2coop patches apply              # patch the OpenJK submodule (incl. render fidelity)
+    jk2coop install                    # symlinks your Steam assets + co-op gamecode into place
+    jk2coop launch                     # play single-player (default map kejim_post)
+    jk2coop launch --host              # host a co-op game on UDP 29070
+    jk2coop launch --join <host-ip>    # join one from another machine
 
 On Windows (from the `jk2coop-windows` CI artifact or a local build):
 
@@ -127,8 +129,19 @@ Dependencies are vendored, so the build is offline and reproducible.
 ./jk2coop pk3 coop-ui            # build the co-op UI overlay pak
 ./jk2coop install                # stage the data dir + launchers (autodetects Steam)
 ./jk2coop install --uninstall    # remove exactly what it installed
+./jk2coop launch                 # run the staged engine, single-player
+./jk2coop launch --host          # host a co-op game
+./jk2coop launch --join <addr>   # join a co-op game
 ./jk2coop --help                 # full command list
 ```
+
+`jk2coop launch` runs the same engine `install` staged (co-op gamecode,
+your linked assets, and your combat + render presets). On Unix it replaces
+the `jk2coop` process with the engine, so the game keeps running under your
+shell; on Windows it runs the engine as a child. Use `--windowed`,
+`--map <name>`, `--skip-cutscenes`, or `--print` (show the command without
+running), and pass raw engine args after `--`
+(e.g. `jk2coop launch -- +set r_mode -2`).
 
 Run any subcommand with `--help` for its flags. Full command reference and
 design notes live in [docs/tooling.md](docs/tooling.md).
