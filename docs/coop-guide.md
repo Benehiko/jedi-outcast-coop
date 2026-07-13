@@ -4,7 +4,19 @@ How to host, find, and join cooperative games once the game is
 [installed](install-linux.md). Up to **four players** per game
 (`sv_maxclients`, default 2).
 
-## From the launchers
+## From the `jk2coop` binary
+
+```sh
+jk2coop launch                       # play; hosts a co-op game on UDP 29070 by default
+jk2coop host                         # explicitly host a co-op game
+jk2coop join <host[:port]>           # join a co-op game by IP
+jk2coop launch --join <host[:port]>  # same as `join`
+jk2coop launch --map <map>           # host a specific map
+```
+
+## From the launcher scripts
+
+The shell/PowerShell installers also write these launcher scripts:
 
 ```sh
 jk2coop-host [map]                   # host a game on UDP 29070

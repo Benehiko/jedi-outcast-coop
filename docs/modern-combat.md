@@ -48,9 +48,10 @@ is unchanged; only the FOV term was made opt-in.
 
 This is separate from the engine's base `sensitivity` cvar, which is the
 raw multiplier on mouse movement. Its stock default (`5`) is fast on a
-modern high-DPI mouse, so the installers set a calmer `0.5` in modern mode
-(tunable — see [Installer options](#installer-options)). You can change it
-any time with `sensitivity <n>` in the console.
+modern high-DPI mouse, so the install sets a calmer `0.5` by default
+(tunable — see [Settings](#settings)). You can change it any time with
+`sensitivity <n>` in the console, or set `[game] sensitivity` in the
+config file.
 
 The CONTROLS menu slider is also rescaled. Retail defines it as
 `cvarfloat "sensitivity" 5 2 30` — default 5, **min 2**, max 30 — so the
@@ -157,27 +158,43 @@ Implementation: `codeJK2/game/g_active.cpp`, in the in-camera branch of
 `ClientThink_real` — when the cvar is on and we are not already skipping,
 it calls the same `G_StartCinematicSkip()` the *use* button triggers.
 
-## Installer options
+## Settings
 
-The co-op installers write these choices into `base/autoexec_sp.cfg` (the
-engine execs it at startup, after `openjo_sp.cfg`, so it overrides a stale
-config that may have persisted the old values):
+Combat feel is configured in the config file at
+`~/.config/jk2coop/config.toml` (macOS `~/Library/Application
+Support/jk2coop/config.toml`, Windows `%AppData%\jk2coop\config.toml`),
+under the `[game]` block. Edit it with the Game Settings TUI:
 
-| Flag (Linux/macOS) | Flag (Windows) | Effect |
+```sh
+jk2coop game        # mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes
+```
+
+`jk2coop install` and `jk2coop launch` write these choices into
+`base/autoexec_sp.cfg` (the engine execs it at startup, after
+`openjo_sp.cfg`, so it overrides a stale config that may have persisted the
+old values). The `[game]` fields map to the cvars above:
+
+| Config field | Cvar(s) | Effect |
 |---|---|---|
-| `--combat modern` (default) | `-Combat modern` | Free aim, fixed crosshair, FOV-independent sensitivity |
-| `--combat classic` | `-Combat classic` | Legacy auto-aim, dynamic crosshair, FOV-linked sensitivity |
-| `--skip-cutscenes` | `-SkipCutscenes` | Auto-skip scripted map-intro cutscenes |
-| `--no-skip-cutscenes` | `-NoSkipCutscenes` | Never auto-skip (suppress the prompt) |
-| `--sensitivity N` | `-Sensitivity N` | Base mouse sensitivity for modern mode (default `0.5`) |
+| `sensitivity` | `sensitivity` | Base mouse sensitivity (default `0.5`; JK2 stock is `5`, fast on a high-DPI mouse) |
+| `blaster_velocity` | `g_blasterVelocity` | Primary blaster bolt speed (retail `2300`) |
+| `aim_assist` | `g_saberAutoAim`, `cg_fovSensitivityScale` | `true` restores legacy saber auto-aim and FOV-linked sensitivity |
+| `dynamic_crosshair` | `cg_dynamicCrosshair` | `true` restores the legacy muzzle-traced dynamic crosshair |
+| `skip_cutscenes` | `g_skipIntroCinematics` | `true` auto-skips scripted map-intro cutscenes |
 
-On an interactive run the cutscene-skip choice is prompted; combat mode
-defaults to modern unless `--combat classic` is passed.
+The modern defaults (`aim_assist = false`, `dynamic_crosshair = false`,
+`skip_cutscenes = false`, `sensitivity = 0.5`) give free aim, a fixed
+crosshair, FOV-independent sensitivity, and fast bolts. Set `aim_assist`
+and `dynamic_crosshair` to `true` for the legacy feel.
 
-In modern mode the installers also write `seta sensitivity 0.5` (the JK2
-engine default is `5`, which is fast on a modern high-DPI mouse). Pass
-`--sensitivity N` / `-Sensitivity N` to choose another value; `--combat
-classic` leaves your existing sensitivity untouched.
+The install also builds `zz-sensitivity-menu.pk3` so the CONTROLS slider
+can reach the lower modern range (retail min is 2).
+
+> **Blaster speed cvar.** `blaster_velocity` is backed by patch
+> `0025-blaster-velocity`, which turns the compile-time `BLASTER_VELOCITY`
+> into the archived `g_blasterVelocity` cvar. That patch is part of the
+> always-applied co-op base, so a normal `jk2coop install` builds it in and
+> the value is tunable from the config with no rebuild.
 
 ## Reverting to classic feel
 

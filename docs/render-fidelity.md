@@ -138,14 +138,21 @@ preset therefore also pins `r_gamma 1.0`; if your display genuinely needs
 more brightness, nudge it back up a little (`r_gamma 1.1`–`1.3`) rather than
 leaving it at a menu-set `~2`.
 
-## The installer preset
+## The render-fidelity build + preset
 
-The installers write a `base/autoexec_render.cfg`, exec'd from
-`autoexec_sp.cfg` on startup (the engine only auto-execs the latter). The
-preset is chosen with `--render high|classic` (Linux/macOS) or
-`-Render high|classic` (Windows); **`high` is the default**.
+Render fidelity is one of the two patch-backed graphics features (the other is
+widescreen). It is controlled by `[graphics] lighting` in your config
+(`jk2coop graphics`), which is **on by default**. Because it adds a latched
+renderer cvar, toggling it rebuilds the engine on the next `jk2coop install`;
+`jk2coop graphics` offers to rebuild immediately when you change it.
 
-`--render high` writes:
+The core software-overbright behaviour comes from the patch itself
+(`r_overBrightBitsSoftware`); MSAA is a separate, runtime-only setting in the
+same menu (`[graphics] msaa` → `r_ext_multisample`, no rebuild). The remaining
+fidelity cvars below are the recommended companion values — set them in your own
+`autoexec_sp.cfg` or from the console (latched cvars apply after a restart).
+
+The high-fidelity preset values are:
 
 | Cvar | Value | Effect |
 |---|---|---|
@@ -164,9 +171,9 @@ preset is chosen with `--render high|classic` (Linux/macOS) or
 | `r_lodbias` | `-2` | Hold higher-detail model LODs at distance. |
 | `r_lodscale` | `20` | Push LOD transitions further out. |
 
-`--render classic` pins the same cvars back to their retail engine
-defaults, so a machine previously installed with `high` is fully reverted
-(rather than left with latched values).
+Turning `[graphics] lighting` off (via `jk2coop graphics`) rebuilds the engine
+without the render-fidelity patch, reverting the overbright behaviour; pin the
+companion cvars back to their retail defaults by hand if you set them.
 
 The extra cost — uncompressed 32-bit full-res textures, anisotropic
 filtering, finer tessellation — is trivial on modern GPUs. Everything is a
@@ -182,10 +189,10 @@ diffuse texture is the substitute for surface detail**. This project ships
 two optional, opt-in texture mods that build override paks from *your own*
 retail data (retail files are never modified):
 
-- **Upscale** (`--with-upscale`) — Real-ESRGAN hi-res override of your
-  retail textures. See [hires-textures.md](hires-textures.md).
-- **Textures** (`--with-textures`) — AI-generated material textures. See
-  [asset-generation.md](asset-generation.md).
+- **Upscale** (`[graphics] texture_upscale`) — Real-ESRGAN hi-res override of
+  your retail textures. See [hires-textures.md](hires-textures.md).
+- **Textures** (`[graphics] texture_generate`) — AI-generated material textures.
+  See [asset-generation.md](asset-generation.md).
 
 With `r_picmip 0` and compression off, those higher-res textures are what
 actually approach Blender-level surface detail in-game.
@@ -209,9 +216,9 @@ fix, cvars, better lightmaps, and higher-res textures.
 
 ## Reverting
 
-- **Preset only:** re-run the installer with `--render classic`
-  (`-Render classic` on Windows), or delete
-  `base/autoexec_render.cfg`.
+- **Turn lighting off:** set `[graphics] lighting = false` via
+  `jk2coop graphics` and rebuild, or remove the companion cvars you set in
+  `autoexec_sp.cfg`.
 - **Single cvar at runtime:** e.g. `r_overBrightBitsSoftware 0` then
   `vid_restart` (or restart the game) for the latched ones.
 - **Uninstall** removes `autoexec_render.cfg` along with everything else it

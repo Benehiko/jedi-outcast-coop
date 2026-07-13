@@ -49,76 +49,135 @@ persistently.
 
 ## Commands
 
-Every subcommand maps 1:1 to one of the original scripts:
+There are exactly seven user-facing commands, plus `version` and a hidden
+`dev` group for the low-level build steps:
+
+| Command | What it does |
+| --- | --- |
+| `jk2coop install` | Installs the engine and applies your config: builds/stages the data dir (symlinks + gamecode), writes the autoexec cvars, rebuilds the engine if a patch-backed graphics feature changed, and places any optional texture paks. OS-detected. Flags: `--repo`, `--build`, `--gamedata`, `-y`/`--yes`. |
+| `jk2coop launch` | Runs the staged engine. **Hosts a co-op game by default**; `--join HOST[:PORT]` to join, `--solo` for single-player. Also `--map`, `--windowed`, `--port`, `--print`. |
+| `jk2coop host` | Explicitly hosts a co-op game. |
+| `jk2coop join <IP[:PORT]>` | Joins a co-op game by IP (a positional argument). |
+| `jk2coop game` | Game Settings TUI — mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes. All runtime cvars, no rebuild. |
+| `jk2coop graphics` (alias `gfx`) | Graphics Settings TUI — widescreen, lighting, MSAA, texture upscale, texture generate. Widescreen and lighting are patch-backed and offer a rebuild on change; MSAA and the texture paks are not. |
+| `jk2coop uninstall` | Removes exactly what the install created (manifest-tracked). |
+| `jk2coop version` | Prints version, commit, and build date. |
+
+### The hidden `dev` group
+
+The low-level build steps that used to be top-level commands now live under a
+hidden `jk2coop dev …` group. Regular users never need them; they are for
+working on the engine and the paks:
 
 | Command | Replaces | What it does |
 | --- | --- | --- |
-| `jk2coop patches apply` | `apply-patches.sh` | Applies the patch set to the pinned OpenJK submodule, in order. |
-| `jk2coop pk3 coop-ui` | `build-coop-ui-pk3.sh` | Packs `assets/coop-ui/ui` into `zz-coop-ui.pk3`. |
-| `jk2coop pk3 coop-npcs <GameData/base>` | `build-coop-npcs-pk3.sh` | Extracts the retail NPC config and repackages it as `zzz-coop-npcs.pk3`. |
-| `jk2coop pk3 widescreen` | `build-widescreen-menu-pk3.sh` | Patches the SP video-menu resolution list into `zz-widescreen-menu.pk3`. |
-| `jk2coop pk3 sensitivity` | `build-sensitivity-menu-pk3.sh` | Rescales the SP CONTROLS mouse-sensitivity slider into `zz-sensitivity-menu.pk3`. |
-| `jk2coop install` | `install-coop.sh` / `install-coop-macos.sh` / `install-coop.ps1` | Stages the data dir (symlinks + gamecode) and installs the launchers. OS-detected. |
-| `jk2coop install --uninstall` | `… --uninstall` | Removes exactly what the install created (manifest-tracked). |
-| `jk2coop launch` | `jk2coop-host` / `jk2coop-join` | Runs the staged engine: single-player (default), `--host`, or `--join <addr>`. |
-| `jk2coop gfx` | — | Toggle the graphics features (combat, widescreen, render fidelity), then reapply patches, rebuild, and reinstall. |
-| `jk2coop version` | — | Prints version, commit, and build date. |
+| `jk2coop dev patches apply` | `apply-patches.sh` | Applies the patch set to the pinned OpenJK submodule, in order. |
+| `jk2coop dev pk3 coop-ui` | `build-coop-ui-pk3.sh` | Packs `assets/coop-ui/ui` into `zz-coop-ui.pk3`. |
+| `jk2coop dev pk3 coop-npcs <GameData/base>` | `build-coop-npcs-pk3.sh` | Extracts the retail NPC config and repackages it as `zzz-coop-npcs.pk3`. |
+| `jk2coop dev pk3 widescreen` | `build-widescreen-menu-pk3.sh` | Patches the SP video-menu resolution list into `zz-widescreen-menu.pk3`. |
+| `jk2coop dev pk3 sensitivity` | `build-sensitivity-menu-pk3.sh` | Rescales the SP CONTROLS mouse-sensitivity slider into `zz-sensitivity-menu.pk3`. |
+| `jk2coop dev gfx …` | — | Low-level graphics-feature toggle (reapply patches → rebuild → reinstall). `jk2coop graphics` is the user-facing wrapper. |
 
 Run any command with `--help` for its flags.
 
 ### Repository root detection
 
-`patches`, `pk3 coop-ui`, and `install` locate the repo root by walking up from
-the working directory until they find the `patches/`, `openjk/`, and `go.mod`
-markers. Run them from anywhere inside the checkout, or pass `--repo <path>`.
+`install`, and the `dev patches`/`dev pk3` build steps, locate the repo root
+by walking up from the working directory until they find the `patches/`,
+`openjk/`, and `go.mod` markers. Run them from anywhere inside the checkout,
+or pass `--repo <path>`.
 
 ### Install flags
 
+`install` no longer takes combat/render/mod flags — those settings now live
+in the config file (see [Settings](#settings-the-config-file) below). The
+remaining flags are:
+
 ```bash
-jk2coop install                       # autodetect Steam GameData, prompt for optional mods
+jk2coop install                       # autodetect Steam GameData
 jk2coop install --gamedata /path/to/"Jedi Outcast"/GameData
-jk2coop install --all                 # enable every optional mod
-jk2coop install --with-widescreen     # only the widescreen menu mod
-jk2coop install --no-optional         # core install only, no prompts
-jk2coop install --yes                 # assume "yes" to prompts (non-interactive)
-jk2coop install --uninstall           # remove everything it created
+jk2coop install --repo /path/to/checkout   # repo root (else autodetected)
+jk2coop install --build /path/to/build     # engine build dir
+jk2coop install -y                    # assume "yes" to prompts (non-interactive)
 ```
 
-**Modern combat feel.** The install always writes `base/autoexec_sp.cfg` (the
-engine execs it at startup, so it wins over a stale `openjo_sp.cfg`) with the
-combat cvars, matching `install-coop.sh`:
+`install` builds/stages the engine, symlinks your retail assets and the co-op
+gamecode, applies your config (writing the autoexec cvars, rebuilding the
+engine if a patch-backed graphics feature changed, and placing any optional
+texture paks), and installs the launchers. To remove everything it created,
+run `jk2coop uninstall` (manifest-tracked).
 
-```bash
-jk2coop install --combat modern       # default: free aim, fixed crosshair, FOV-independent sensitivity, fast bolts
-jk2coop install --combat classic      # legacy feel (auto-aim, dynamic crosshair, FOV-linked sensitivity)
-jk2coop install --sensitivity 0.7     # base mouse sensitivity for modern mode (default 0.5)
-jk2coop install --skip-cutscenes      # auto-skip scripted map-intro cutscenes
-jk2coop install --no-skip-cutscenes   # never auto-skip (suppress the prompt)
-```
-
-In `modern` mode the install also builds `zz-sensitivity-menu.pk3` so the
-CONTROLS slider can reach the lower modern range (retail min is 2). See
+The install always writes `base/autoexec_sp.cfg` (the engine execs it at
+startup, so it wins over a stale `openjo_sp.cfg`) from your config's `[game]`
+cvars. See [Settings](#settings-the-config-file) and
 [modern-combat.md](modern-combat.md).
+
+### Settings: the config file
+
+`jk2coop`'s single source of truth for gameplay and graphics preferences is a
+TOML file resolved via `os.UserConfigDir`:
+
+| OS | Path |
+| --- | --- |
+| Linux | `~/.config/jk2coop/config.toml` |
+| macOS | `~/Library/Application Support/jk2coop/config.toml` |
+| Windows | `%AppData%\jk2coop\config.toml` |
+
+Edit it with the `jk2coop game` and `jk2coop graphics` TUIs, or by hand. It is
+applied to the game on the next `install` or `launch` (which rewrites
+`base/autoexec_sp.cfg`).
+
+```toml
+[game]
+sensitivity = 0.5        # base mouse sensitivity
+blaster_velocity = 2300  # primary blaster bolt speed (retail 2300); g_blasterVelocity cvar
+aim_assist = false       # legacy saber auto-aim + FOV-linked sensitivity
+dynamic_crosshair = false
+skip_cutscenes = false
+
+[graphics]
+widescreen = true        # patch-backed (needs rebuild to change)
+lighting = true          # render-fidelity patch (needs rebuild)
+msaa = 0                 # r_ext_multisample: 0/2/4/8 (runtime cvar)
+texture_upscale = false  # GPU pak
+texture_generate = false # GPU pak
+```
+
+The `[game]` fields are all runtime cvars, so `jk2coop game` never rebuilds.
+Under `[graphics]`, `widescreen` and `lighting` are patch-backed features —
+changing them means the engine must be rebuilt, which `jk2coop graphics`
+offers to do (and `jk2coop install` does on demand). `msaa` and the two
+texture paks are not patch-backed.
+
+`blaster_velocity` is backed by patch `0025-blaster-velocity`, which turns the
+compile-time `BLASTER_VELOCITY` into the archived `g_blasterVelocity` cvar.
+That patch is part of the always-applied co-op base (patches `0001`–`0021`),
+so a normal `jk2coop install` builds it in and blaster speed is adjustable
+from the config with no extra steps.
 
 ### Launch flags
 
 `jk2coop launch` runs the same engine `install` staged, with `fs_basepath`
 pointed at the data dir so it picks up the co-op gamecode, the linked retail
-assets, and your `autoexec_*.cfg` presets (combat + render). It subsumes the
-generated `jk2coop-host` / `jk2coop-join` launcher scripts.
+assets, and your config-derived `autoexec_sp.cfg`. It **hosts a co-op game by
+default**, and subsumes the generated `jk2coop-host` / `jk2coop-join` launcher
+scripts. `jk2coop host` and `jk2coop join <IP>` are explicit shortcuts for the
+host/join modes.
 
 ```bash
-jk2coop launch                        # single-player, default map (kejim_post), fullscreen
-jk2coop launch --map t2_trip          # single-player, a specific map
+jk2coop launch                        # host a co-op game on UDP 29070 (default), fullscreen
+jk2coop launch --solo                 # single-player, default map (kejim_post)
+jk2coop launch --map t2_trip          # a specific map
 jk2coop launch --windowed             # run windowed instead of fullscreen
-jk2coop launch --skip-cutscenes       # auto-skip scripted map-intro cutscenes this run
-jk2coop launch --host                 # host a co-op game on UDP 29070
-jk2coop launch --host --port 30000    # host on a specific port
+jk2coop launch --port 30000           # host on a specific port
 jk2coop launch --join 192.168.1.5     # join (defaults to :29070)
 jk2coop launch --join 192.168.1.5:30000
 jk2coop launch --print                # print the resolved engine command, don't run it
 jk2coop launch -- +set r_mode -2      # pass raw engine args after `--`
 ```
+
+Cutscene skip and the other combat cvars are no longer launch flags — set
+them once in the config with `jk2coop game`.
 
 On Unix `launch` **replaces** the `jk2coop` process with the engine (via
 `exec`), so the game keeps running under your shell after `jk2coop` would have
@@ -141,44 +200,33 @@ Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 > symlink on Windows needs Developer Mode enabled or an elevated shell; if the
 > OS refuses, the install fails with the underlying error.
 
-### Graphics features (`jk2coop gfx`)
+### Graphics settings (`jk2coop graphics`)
 
-The graphics work is split into three patch-level features you can turn on or
-off independently:
+`jk2coop graphics` (alias `gfx`) is the Graphics Settings TUI. It edits the
+`[graphics]` block of the config file — widescreen, lighting, MSAA, texture
+upscale, and texture generate — and applies the change:
 
-| Feature | Patch | What it does |
-| --- | --- | --- |
-| `modern-combat` | `0022` | Free aim, faster blaster bolts, fixed screen-center crosshair. |
-| `widescreen` | `0023` | 16:9/21:9/32:9 2D aspect correction, extra video modes, edge-anchored HUD. |
-| `render-fidelity` | `0024` | Software overbright lighting plus a matching brightness boost for character models. |
+- **`widescreen`** and **`lighting`** are patch-backed features (16:9/21:9/32:9
+  2D aspect correction with edge-anchored HUD, and software-overbright lighting
+  with a matching model-brightness boost). Because the patches must apply to a
+  pristine submodule, changing either means resetting OpenJK to the pinned
+  commit and reapplying the co-op base (patches `0001`–`0021`, always on) plus
+  the chosen features, then rebuilding. `jk2coop graphics` offers that rebuild
+  when you change one.
+- **`msaa`** (`r_ext_multisample`: 0/2/4/8) is a runtime cvar — no rebuild.
+- **`texture_upscale`** and **`texture_generate`** place optional GPU-built
+  override paks — no engine rebuild.
 
-Because the patches must apply to a pristine submodule, changing the selection
-means resetting OpenJK to the pinned commit and reapplying the co-op base
-(patches `0001`–`0021`, always on) plus the chosen features. `jk2coop gfx` does
-that for you, then rebuilds the engine and reinstalls it:
-
-```bash
-jk2coop gfx                                   # interactive selector (arrow keys, space, enter)
-jk2coop gfx --print                           # show which features are currently built in
-jk2coop gfx --set widescreen=off              # turn one off non-interactively
-jk2coop gfx --set modern-combat=on --set render-fidelity=on
-jk2coop gfx --set widescreen=on --no-build    # apply patches only (rebuild yourself later)
-jk2coop gfx --set widescreen=on --no-install  # apply + build, but don't restage
-```
-
-The interactive selector shows each feature's current state and flags pending
-changes; press <kbd>enter</kbd> to apply, <kbd>q</kbd> to cancel. Applying runs
-the full pipeline — reset → reapply → `cmake --build` → `jk2coop install` — so
-the engine is ready to launch when it finishes. It only restages the engine and
-gamecode; the optional asset mods (AI textures, upscale) are left to
-`jk2coop install` and are never triggered here.
-
-Most of these features are also live cvars (`r_aspectCorrect2D`,
+Most of the patch-backed features are also live cvars (`r_aspectCorrect2D`,
 `cg_hudEdgeAnchor`, `r_overBrightBits*`), so for day-to-day tweaking you can
 toggle them from the console without a rebuild — see
 [widescreen.md](widescreen.md) and [render-fidelity.md](render-fidelity.md).
-Use `jk2coop gfx` when you want a feature's code compiled out entirely (for
-example to A/B against stock behavior).
+Use `jk2coop graphics` when you want a feature's code compiled in or out
+entirely.
+
+The low-level feature toggle (reset → reapply patches → `cmake --build` →
+`jk2coop install`) is still available under the hidden `jk2coop dev gfx …`
+group for engine work; `jk2coop graphics` is the user-facing wrapper over it.
 
 ## Development
 
@@ -196,7 +244,7 @@ make e2e     # end-to-end tests (needs the OpenJK submodule + git)
 real repository rather than mocks. `make e2e` builds `jk2coop` and runs:
 
 - **`TestPatchesApplyToPristineSubmodule`** — resets the OpenJK submodule to
-  pristine, runs `jk2coop patches apply`, and asserts every `patches/*.patch`
+  pristine, runs `jk2coop dev patches apply`, and asserts every `patches/*.patch`
   is reported `applied` (none skipped) and the submodule tree actually changed.
 - **`TestPatchesApplyNotIdempotentOnDirtyTree`** — applies once, then asserts a
   second apply on the now-patched tree fails with the reset guidance (the
@@ -219,7 +267,7 @@ attaches the archives to a GitHub Release.
   menu files' CRLF line endings and latin-1 encoding, and refuses to touch a
   file whose resolution list is not in the exact stock form (already patched or
   a different edition).
-- **`patches apply` is not idempotent on a dirty tree** — the patches overlap
+- **`dev patches apply` is not idempotent on a dirty tree** — the patches overlap
   and are cumulative (e.g. 0004 sets the `sv_maxclients` infostring to
   `MAX_CLIENTS` and 0020 later rewrites that same line to honour the runtime
   cvar), so re-running against a fully-patched submodule aborts. Reset first:

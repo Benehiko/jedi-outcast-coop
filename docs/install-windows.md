@@ -51,7 +51,35 @@ The CI `jk2coop-windows` artifact (and a local build) produces the engine
 `jospgamex86_64.dll`, and `SDL2.dll` (the engine's windowing library, loaded
 next to the exe).
 
-## 2. Install with the PowerShell installer
+## 2. Install
+
+The cross-platform `jk2coop` Go binary is the recommended installer on
+Windows too (see [tooling.md](tooling.md)):
+
+```powershell
+jk2coop install                 # autodetect Steam GameData
+jk2coop install --gamedata "D:\Games\Jedi Outcast\GameData"
+jk2coop install -y              # assume yes to prompts (non-interactive)
+```
+
+`jk2coop install` stages the co-op engine, symlinks your retail assets and
+the co-op gamecode, applies your config (autoexec cvars, the patch-backed
+graphics features, and any optional texture paks), and installs the
+launchers. Run `jk2coop uninstall` to remove everything it installed.
+(Creating symlinks on Windows needs Developer Mode enabled or an elevated
+shell; if the OS refuses, the install fails with the underlying error.)
+
+Gameplay and graphics preferences live in a single config file at
+`%AppData%\jk2coop\config.toml`. Edit it with `jk2coop game` (mouse
+sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes)
+or `jk2coop graphics` (widescreen, lighting, MSAA, texture upscale/generate),
+and it is applied on the next `install` or `launch`. `[game]` settings are
+runtime cvars; under `[graphics]`, `widescreen` and `lighting` are
+patch-backed and require a rebuild to change (which `install` handles). See
+the [Linux guide](install-linux.md#settings-config-file) for the full TOML
+schema.
+
+### The PowerShell installer
 
 `tools/install-coop.ps1` performs an additive install — it never copies,
 overwrites, or modifies any retail file. It stages the co-op engine,
@@ -119,8 +147,12 @@ Linux machine, then copy the resulting `zzz-*.pk3` into your `base\`.
 
 ### Combat and render presets
 
-Two cvar-only presets are written to `base\` and default on (revertible;
-`-Uninstall` removes them):
+With `jk2coop`, combat feel and render fidelity are set through the config
+file (`jk2coop game` and `jk2coop graphics`) rather than install switches —
+see the settings note under [Install](#2-install) above. Both default on.
+
+The PowerShell installer still writes two cvar-only presets to `base\` and
+takes switches for them (they default on; `-Uninstall` removes them):
 
 - `-Combat modern|classic` (default `modern`) — see
   [modern-combat.md](modern-combat.md).
@@ -130,8 +162,17 @@ Two cvar-only presets are written to `base\` and default on (revertible;
 
 ## 3. Play
 
-The installer writes `jk2coop-host.cmd` and `jk2coop-join.cmd` next to the
-staging directory. Host a game:
+With the `jk2coop` binary:
+
+```powershell
+jk2coop launch                  # play; hosts a co-op game on UDP 29070 by default
+jk2coop launch --map ns_streets # host a specific map
+jk2coop join <host-ip>          # join a co-op game from another machine
+jk2coop launch --solo           # single-player
+```
+
+The PowerShell installer also writes `jk2coop-host.cmd` and
+`jk2coop-join.cmd` next to the staging directory. Host a game:
 
 ```bat
 jk2coop-host.cmd            :: host kejim_post on port 29070

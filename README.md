@@ -28,17 +28,16 @@ crosshair is fixed at screen center instead of drifting behind the view,
 saber auto-aim no longer snaps onto nearby enemies by default, and
 blaster bolts fly roughly twice as fast. There's also an opt-in to
 auto-skip scripted map-intro cutscenes. All of it is cvar-controlled, and
-the installers can write your choice (`--combat modern|classic`,
-`--skip-cutscenes`) — see
+your choices live in a config file you edit with `jk2coop game` — see
 [docs/modern-combat.md](docs/modern-combat.md).
 
 Rendering fidelity is improved too. JK2's models are high-fidelity in
 Blender but read as flat and dark in-game, largely because the classic
 overbright lighting silently switches off on Wayland and in windowed mode.
-An engine fix restores it there (software overbright), and the installers
-default to a `--render high` preset — sharper, uncompressed textures,
-anisotropic filtering, and restored lighting punch — revertible with
-`--render classic`. See
+An engine fix restores it there (software overbright), and the install
+defaults to high render fidelity — sharper, uncompressed textures,
+anisotropic filtering, and restored lighting punch — adjustable with
+`jk2coop graphics`. See
 [docs/render-fidelity.md](docs/render-fidelity.md).
 
 In progress: syncing the campaign UI — objectives, mission text,
@@ -66,25 +65,35 @@ files — your game install is never copied from or modified.
 | Windows | [docs/install-windows.md](docs/install-windows.md) | PowerShell installer; co-op verified live |
 | macOS | [docs/install-macos.md](docs/install-macos.md) | one-command installer (not yet run on real hardware) |
 
-The short version on Linux, once built ([docs/building.md](docs/building.md)):
+The short version, once built ([docs/building.md](docs/building.md)):
 
-    jk2coop patches apply              # patch the OpenJK submodule (incl. render fidelity)
-    jk2coop install                    # symlinks your Steam assets + co-op gamecode into place
-    jk2coop launch                     # play single-player (default map kejim_post)
-    jk2coop launch --host              # host a co-op game on UDP 29070
-    jk2coop launch --join <host-ip>    # join one from another machine
+    jk2coop install                    # build the engine, symlink your Steam assets, apply your config
+    jk2coop launch                     # play; hosts a co-op game on UDP 29070 by default
+    jk2coop launch --solo              # play single-player (default map kejim_post)
+    jk2coop join <host-ip>             # join a co-op game from another machine
+    jk2coop uninstall                  # remove everything it installed
 
-On Windows (from the `jk2coop-windows` CI artifact or a local build):
+There are exactly seven user-facing commands: `install`, `launch`,
+`host`, `join`, `game`, `graphics` (alias `gfx`), and `uninstall`. The
+same cross-platform `jk2coop` Go binary is the recommended path on Linux,
+macOS, and Windows, with pre-built binaries on every release. See
+[docs/tooling.md](docs/tooling.md). The `tools/*.sh` scripts remain and
+continue to work unchanged.
 
-    powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1
-    jk2coop-host.cmd                   # host a game on UDP 29070
-    jk2coop-join.cmd <host-ip>         # join it from another machine
+### Settings
 
-The same install/patch/pak steps are also available as a single
-cross-platform Go binary, `jk2coop` (`jk2coop install`, `jk2coop patches
-apply`, `jk2coop pk3 …`) — the recommended path on all three OSes, with
-pre-built binaries on every release. See [docs/tooling.md](docs/tooling.md).
-The `tools/*.sh` scripts remain and continue to work unchanged.
+Your gameplay and graphics preferences live in a single config file at
+`~/.config/jk2coop/config.toml` (on macOS `~/Library/Application
+Support/jk2coop/config.toml`, on Windows `%AppData%\jk2coop\config.toml`).
+Edit it with the two settings TUIs — or by hand — and it is applied to the
+game on the next `install` or `launch`:
+
+    jk2coop game        # mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes
+    jk2coop graphics    # widescreen, lighting, MSAA, texture upscale/generate (alias: gfx)
+
+`game` settings are all runtime cvars and take effect immediately.
+Widescreen and lighting under `graphics` are patch-backed, so changing
+them offers to rebuild the engine; MSAA and the texture paks are not.
 
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).
@@ -125,23 +134,25 @@ Dependencies are vendored, so the build is offline and reproducible.
 ### Running it
 
 ```sh
-./jk2coop patches apply          # apply the co-op patches to the submodule
-./jk2coop pk3 coop-ui            # build the co-op UI overlay pak
-./jk2coop install                # stage the data dir + launchers (autodetects Steam)
-./jk2coop install --uninstall    # remove exactly what it installed
-./jk2coop launch                 # run the staged engine, single-player
-./jk2coop launch --host          # host a co-op game
-./jk2coop launch --join <addr>   # join a co-op game
+./jk2coop install                # build the engine, stage the data dir, apply your config (autodetects Steam)
+./jk2coop launch                 # play; hosts a co-op game by default
+./jk2coop launch --solo          # single-player
+./jk2coop host                   # explicitly host a co-op game
+./jk2coop join <addr>            # join a co-op game by IP
+./jk2coop game                   # edit gameplay settings (config file)
+./jk2coop graphics               # edit graphics settings (config file)
+./jk2coop uninstall              # remove exactly what it installed
 ./jk2coop --help                 # full command list
 ```
 
-`jk2coop launch` runs the same engine `install` staged (co-op gamecode,
-your linked assets, and your combat + render presets). On Unix it replaces
-the `jk2coop` process with the engine, so the game keeps running under your
-shell; on Windows it runs the engine as a child. Use `--windowed`,
-`--map <name>`, `--skip-cutscenes`, or `--print` (show the command without
-running), and pass raw engine args after `--`
-(e.g. `jk2coop launch -- +set r_mode -2`).
+`jk2coop launch` runs the engine `install` staged (co-op gamecode, your
+linked assets, and the config you set with `game`/`graphics`). It hosts a
+co-op game by default; pass `--join HOST[:PORT]` to join one or `--solo`
+for single-player. On Unix it replaces the `jk2coop` process with the
+engine, so the game keeps running under your shell; on Windows it runs the
+engine as a child. Use `--windowed`, `--map <name>`, `--port`, or
+`--print` (show the command without running), and pass raw engine args
+after `--` (e.g. `jk2coop launch -- +set r_mode -2`).
 
 Run any subcommand with `--help` for its flags. Full command reference and
 design notes live in [docs/tooling.md](docs/tooling.md).
@@ -185,13 +196,13 @@ See `jk2coop completion <shell> --help` for per-shell details.
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
 | [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
 | [modern-combat.md](docs/modern-combat.md) | Modernized combat feel: FOV-independent aim, fixed screen-center crosshair, saber auto-aim off by default, faster blaster bolts (all cvar/opt-in) |
-| [render-fidelity.md](docs/render-fidelity.md) | Why models look flat in-game vs Blender, the software-overbright lighting fix, and the `--render high` texture/filtering/LOD preset |
+| [render-fidelity.md](docs/render-fidelity.md) | Why models look flat in-game vs Blender, the software-overbright lighting fix, and the high texture/filtering/LOD render preset |
 | [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [asset-formats.md](docs/asset-formats.md) | Reference: the game's file formats (`.pk3`, `.md3`, `.glm`/`.gla`, `.bsp`, …) and how to open them in Blender |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
 | [testing.md](docs/testing.md) | Verifying changes headlessly: the single-instance and co-op screenshot harnesses |
-| [tooling.md](docs/tooling.md) | The cross-platform `jk2coop` Go binary: patches, pak building, install/uninstall |
+| [tooling.md](docs/tooling.md) | The cross-platform `jk2coop` Go binary: install, launch, host/join, game/graphics settings, uninstall |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** Status: what's done, what's outstanding, as sitting-sized tasks |
 | [campaign-ui-plan.md](docs/campaign-ui-plan.md) | Track F plan: syncing objectives, mission text, and cutscenes to joiners |
