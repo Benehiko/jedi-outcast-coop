@@ -22,6 +22,14 @@ cd jedi-outcast-rebuild
 tools/apply-patches.sh              # apply the co-op patches to the submodule
 ```
 
+Or, using the cross-platform `jk2coop` Go binary (equivalent; see
+[tooling.md](tooling.md)):
+
+```sh
+go build -mod=vendor -o jk2coop .
+./jk2coop patches apply
+```
+
 The patches are cumulative and overlap (several touch the same lines — e.g.
 one patch sets `MAX_CLIENTS` to 2 and a later one changes it to 4). They apply
 cleanly in order to a **pristine** submodule, but `apply-patches.sh` is not

@@ -69,8 +69,41 @@ On Windows (from the `jk2coop-windows` CI artifact or a local build):
     jk2coop-host.cmd                   # host a game on UDP 29070
     jk2coop-join.cmd <host-ip>         # join it from another machine
 
+The same install/patch/pak steps are also available as a single
+cross-platform Go binary, `jk2coop` (`jk2coop install`, `jk2coop patches
+apply`, `jk2coop pk3 …`) — the recommended path on all three OSes, with
+pre-built binaries on every release. See [docs/tooling.md](docs/tooling.md).
+The `tools/*.sh` scripts remain and continue to work unchanged.
+
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).
+
+## The `jk2coop` tool (Go)
+
+The patch/pak/install tooling is also a single cross-platform Go binary,
+`jk2coop`. Pre-built binaries for Linux, macOS, and Windows are attached to
+every [release](https://github.com/Benehiko/jedi-outcast-coop/releases) — grab
+one and skip the build. To build it yourself you need **Go 1.26.5+**:
+
+```sh
+make build            # produces ./jk2coop (version metadata baked in)
+# or, without make:
+go build -mod=vendor -o jk2coop .
+```
+
+Dependencies are vendored, so the build is offline and reproducible. Then:
+
+```sh
+./jk2coop patches apply          # apply the co-op patches to the submodule
+./jk2coop pk3 coop-ui            # build the co-op UI overlay pak
+./jk2coop install                # stage the data dir + launchers (autodetects Steam)
+./jk2coop install --uninstall    # remove exactly what it installed
+./jk2coop --help                 # full command list
+```
+
+Development targets: `make fmt` (gofumpt + goimports), `make lint` (mirrors CI),
+`make test` (race), `make hooks` (enable the pre-commit hook). Full command
+reference and design notes: [docs/tooling.md](docs/tooling.md).
 
 ## Documentation
 
@@ -85,6 +118,7 @@ Hosting from the in-game console/menu and LAN discovery:
 | [asset-formats.md](docs/asset-formats.md) | Reference: the game's file formats (`.pk3`, `.md3`, `.glm`/`.gla`, `.bsp`, …) and how to open them in Blender |
 | [building.md](docs/building.md) | Building from source, debug builds, development loop |
 | [testing.md](docs/testing.md) | Verifying changes headlessly: the single-instance and co-op screenshot harnesses |
+| [tooling.md](docs/tooling.md) | The cross-platform `jk2coop` Go binary: patches, pak building, install/uninstall |
 | [ci.md](docs/ci.md) | What the GitHub Actions CI checks, and how to run those checks locally |
 | [tasks.md](docs/tasks.md) | **Implementing? Start here.** Status: what's done, what's outstanding, as sitting-sized tasks |
 | [campaign-ui-plan.md](docs/campaign-ui-plan.md) | Track F plan: syncing objectives, mission text, and cutscenes to joiners |

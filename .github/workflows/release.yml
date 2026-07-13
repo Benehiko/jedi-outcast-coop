@@ -1,0 +1,135 @@
+name: release
+
+# Build the jk2coop tooling binary for every supported platform and attach the
+# archives to a GitHub Release. Triggered by pushing a v* tag (e.g. v0.1.0), or
+# manually via workflow_dispatch for a dry run (build artifacts, no release).
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME:-dev}"
+          commit="$(git rev-parse --short HEAD)"
+          date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          pkg="github.com/Benehiko/jedi-outcast-coop/cmd"
+          ldflags="-s -w -X ${pkg}.version=${version} -X ${pkg}.commit=${commit} -X ${pkg}.date=${date}"
+
+          bin="jk2coop"
+          [ "$GOOS" = "windows" ] && bin="jk2coop.exe"
+          out="dist/jk2coop_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "$out"
+          go build -mod=vendor -ldflags "$ldflags" -o "$out/$bin" .
+          cp README.md LICENSE "$out/"
+
+          # Archive: .zip for Windows, .tar.gz otherwise.
+          cd dist
+          if [ "$GOOS" = "windows" ]; then
+            zip -qr "$(basename "$out").zip" "$(basename "$out")"
+          else
+            tar -czf "$(basename "$out").tar.gz" "$(basename "$out")"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jk2coop-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: ignore
+
+      - name: Upload build artifact (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jk2coop-${{ matrix.goos }}-${{ matrix.goarch }}-zip
+          path: dist/*.zip
+          if-no-files-found: ignore
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      # Full history is needed to diff this tag against the previous one for the
+      # commit-message changelog.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Build a changelog from the commit messages between the previous v* tag
+      # and this one (grouped as a bulleted subject list). Written to
+      # CHANGELOG.md and passed to the release as its body.
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+
+          if [ -n "$prev" ]; then
+            range="${prev}..${tag}"
+            header="## Changes since ${prev}"
+          else
+            range="${tag}"
+            header="## Changes"
+          fi
+
+          {
+            echo "$header"
+            echo
+            # One bullet per commit: subject only, newest first. Merge commits
+            # are excluded so the list reads as real changes.
+            git log --no-merges --pretty=format:'- %s (%h)' "$range"
+            echo
+            echo
+            echo "**Full commit log:** \`git log ${range}\`"
+          } > CHANGELOG.md
+
+          echo "Generated changelog:"
+          cat CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+          # Our commit-message changelog as the body, plus GitHub's own
+          # auto-generated notes (contributors, PRs) appended below it.
+          body_path: CHANGELOG.md
+          generate_release_notes: true
