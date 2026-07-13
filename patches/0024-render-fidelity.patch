@@ -1,8 +1,6 @@
-diff --git a/code/rd-vanilla/tr_image.cpp b/code/rd-vanilla/tr_image.cpp
-index a13badd4..ebdb578e 100644
 --- a/code/rd-vanilla/tr_image.cpp
 +++ b/code/rd-vanilla/tr_image.cpp
-@@ -1408,14 +1408,25 @@ void R_SetColorMappings( void ) {
+@@ -1408,14 +1408,25 @@
  
  	// setup the overbright lighting
  	tr.overbrightBits = r_overBrightBits->integer;
@@ -34,11 +32,9 @@ index a13badd4..ebdb578e 100644
  	}
  
  	if ( tr.overbrightBits > 1 ) {
-diff --git a/code/rd-vanilla/tr_init.cpp b/code/rd-vanilla/tr_init.cpp
-index 01f67409..e2fc44b5 100644
 --- a/code/rd-vanilla/tr_init.cpp
 +++ b/code/rd-vanilla/tr_init.cpp
-@@ -137,6 +137,7 @@ cvar_t	*r_subdivisions;
+@@ -137,6 +137,7 @@
  cvar_t	*r_lodCurveError;
  
  cvar_t	*r_overBrightBits;
@@ -46,7 +42,7 @@ index 01f67409..e2fc44b5 100644
  cvar_t	*r_mapOverBrightBits;
  
  cvar_t	*r_debugSurface;
-@@ -1539,6 +1540,17 @@ void R_Register( void )
+@@ -1539,6 +1540,17 @@
  	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
  	r_texturebitslm = ri.Cvar_Get( "r_texturebitslm", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
  	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
@@ -64,11 +60,43 @@ index 01f67409..e2fc44b5 100644
  	r_mapOverBrightBits = ri.Cvar_Get( "r_mapOverBrightBits", "0", CVAR_ARCHIVE_ND|CVAR_LATCH );
  	r_simpleMipMaps = ri.Cvar_Get( "r_simpleMipMaps", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
  	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
-diff --git a/code/rd-vanilla/tr_local.h b/code/rd-vanilla/tr_local.h
-index ea07dfad..9b7d4e97 100644
+--- a/code/rd-vanilla/tr_light.cpp
++++ b/code/rd-vanilla/tr_light.cpp
+@@ -447,10 +447,29 @@
+ 		VectorMA( lightDir, d, dir, lightDir );
+ 	}
+ 
++	// coop render fidelity: entity (model) lighting is applied as per-vertex color
++	// modulating the skin, never through the framebuffer. The classic overbright
++	// path relied on the hardware gamma ramp doubling the *whole* framebuffer at
++	// display time to bring pre-halved lighting back to full — that doubling also
++	// lifted model vertex colors. The software-overbright path (patch 0025) bakes
++	// the overbright << shift into textures at upload instead, which never touches
++	// vertex colors, so models keep only half the light and read dark against the
++	// lit world (worst on faces angled away from the light, which fall back to
++	// ambient alone). Re-apply the missing factor here, and lift the ambient
++	// ceiling to full 255 to match, but only on the software path so the classic
++	// hardware-gamma path is unchanged.
++	float ambientCeil = tr.identityLightByte;
++	if ( r_overBrightBitsSoftware && r_overBrightBitsSoftware->integer && tr.overbrightBits > 0 ) {
++		const float obScale = (float)( 1 << tr.overbrightBits );
++		VectorScale( ent->ambientLight, obScale, ent->ambientLight );
++		VectorScale( ent->directedLight, obScale, ent->directedLight );
++		ambientCeil = 255.0f;
++	}
++
+ 	// clamp ambient
+ 	for ( i = 0 ; i < 3 ; i++ ) {
+-		if ( ent->ambientLight[i] > tr.identityLightByte ) {
+-			ent->ambientLight[i] = tr.identityLightByte;
++		if ( ent->ambientLight[i] > ambientCeil ) {
++			ent->ambientLight[i] = ambientCeil;
+ 		}
+ 	}
+ 
 --- a/code/rd-vanilla/tr_local.h
 +++ b/code/rd-vanilla/tr_local.h
-@@ -1205,6 +1205,7 @@ extern	cvar_t	*r_skipBackEnd;
+@@ -1206,6 +1206,7 @@
  extern	cvar_t	*r_ignoreGLErrors;
  
  extern	cvar_t	*r_overBrightBits;

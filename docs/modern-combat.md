@@ -26,7 +26,7 @@ day. Three of its combat defaults read as dated on modern high-DPI, high
 This change modernizes those, and adds an opt-in to auto-skip the
 scripted map-intro cutscenes. It is engine-side (gamecode + client-game),
 shipped as patch
-[`patches/0024-modern-combat.patch`](../patches/0024-modern-combat.patch);
+[`patches/0022-modern-combat.patch`](../patches/0022-modern-combat.patch);
 no asset or retail-file changes are involved.
 
 ## What changed
@@ -191,7 +191,7 @@ seta g_skipIntroCinematics 0   // let map-intro cutscenes play (default)
 ```
 
 Projectile speeds are compile-time; to restore them, edit the velocities
-in `codeJK2/game/weapons.h` (or drop patch `0024` from the stack) and
+in `codeJK2/game/weapons.h` (or drop patch `0022` from the stack) and
 rebuild.
 
 ## Verifying
