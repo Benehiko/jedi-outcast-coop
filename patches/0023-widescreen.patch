@@ -454,7 +454,7 @@
  extern	vmCvar_t		cg_animSpeed;
  extern	vmCvar_t		cg_debugAnim;
  extern	vmCvar_t		cg_debugSaber;
-@@ -1037,6 +1038,12 @@
+@@ -1036,6 +1037,12 @@
  	float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
  void	cgi_R_LAGoggles( void );
  void	cgi_R_Scissor( float x, float y, float w, float h);
@@ -469,22 +469,22 @@
  // If it needs to change, the entire cgame will be restarted, because
 --- a/codeJK2/cgame/cg_main.cpp
 +++ b/codeJK2/cgame/cg_main.cpp
-@@ -285,6 +285,7 @@
- vmCvar_t	cg_fov;
- vmCvar_t	cg_fovAspectAdjust;
- vmCvar_t	cg_fovSensitivityScale;
+@@ -264,6 +264,7 @@
+ vmCvar_t	cg_draw2D;
+ vmCvar_t	cg_drawStatus;
+ vmCvar_t	cg_drawHUD;
 +vmCvar_t	cg_hudEdgeAnchor;
- vmCvar_t	cg_missionstatusscreen;
- vmCvar_t	cg_endcredits;
- vmCvar_t	cg_updatedDataPadForcePower1;
-@@ -351,6 +352,7 @@
- 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
- 	{ &cg_fov, "cg_fov", "80", CVAR_ARCHIVE },
- 	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "0", CVAR_ARCHIVE },
+ vmCvar_t	cg_animSpeed;
+ vmCvar_t	cg_debugAnim;
+ vmCvar_t	cg_debugSaber;
+@@ -356,6 +357,7 @@
+ 	{ &cg_draw2D, "cg_draw2D", "1", CVAR_ARCHIVE  },
+ 	{ &cg_drawStatus, "cg_drawStatus", "1", CVAR_ARCHIVE  },
+ 	{ &cg_drawHUD, "cg_drawHUD", "1", 0  },
 +	{ &cg_hudEdgeAnchor, "cg_hudEdgeAnchor", "1", CVAR_ARCHIVE },	// 1 = anchor corner HUD to true screen edges on widescreen; 0 = keep it pillarboxed
- 	{ &cg_fovSensitivityScale, "cg_fovSensitivityScale", "0", CVAR_ARCHIVE },	// 0 = mouse sensitivity is FOV-independent (modern); 1 = legacy JK2 behavior (sensitivity scales with fov_y/75)
- 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
- 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
+ 	{ &cg_drawTimer, "cg_drawTimer", "0", CVAR_ARCHIVE  },
+ 	{ &cg_drawFPS, "cg_drawFPS", "0", CVAR_ARCHIVE  },
+ 	{ &cg_drawSnapshot, "cg_drawSnapshot", "0", CVAR_ARCHIVE  },
 --- a/codeJK2/cgame/cg_public.h
 +++ b/codeJK2/cgame/cg_public.h
 @@ -198,6 +198,8 @@
