@@ -61,6 +61,7 @@ Every subcommand maps 1:1 to one of the original scripts:
 | `jk2coop install` | `install-coop.sh` / `install-coop-macos.sh` / `install-coop.ps1` | Stages the data dir (symlinks + gamecode) and installs the launchers. OS-detected. |
 | `jk2coop install --uninstall` | `… --uninstall` | Removes exactly what the install created (manifest-tracked). |
 | `jk2coop launch` | `jk2coop-host` / `jk2coop-join` | Runs the staged engine: single-player (default), `--host`, or `--join <addr>`. |
+| `jk2coop gfx` | — | Toggle the graphics features (combat, widescreen, render fidelity), then reapply patches, rebuild, and reinstall. |
 | `jk2coop version` | — | Prints version, commit, and build date. |
 
 Run any command with `--help` for its flags.
@@ -139,6 +140,45 @@ Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 > **Windows note:** staging uses symlinks (`ln -sfn` equivalent). Creating a
 > symlink on Windows needs Developer Mode enabled or an elevated shell; if the
 > OS refuses, the install fails with the underlying error.
+
+### Graphics features (`jk2coop gfx`)
+
+The graphics work is split into three patch-level features you can turn on or
+off independently:
+
+| Feature | Patch | What it does |
+| --- | --- | --- |
+| `modern-combat` | `0022` | Free aim, faster blaster bolts, fixed screen-center crosshair. |
+| `widescreen` | `0023` | 16:9/21:9/32:9 2D aspect correction, extra video modes, edge-anchored HUD. |
+| `render-fidelity` | `0024` | Software overbright lighting plus a matching brightness boost for character models. |
+
+Because the patches must apply to a pristine submodule, changing the selection
+means resetting OpenJK to the pinned commit and reapplying the co-op base
+(patches `0001`–`0021`, always on) plus the chosen features. `jk2coop gfx` does
+that for you, then rebuilds the engine and reinstalls it:
+
+```bash
+jk2coop gfx                                   # interactive selector (arrow keys, space, enter)
+jk2coop gfx --print                           # show which features are currently built in
+jk2coop gfx --set widescreen=off              # turn one off non-interactively
+jk2coop gfx --set modern-combat=on --set render-fidelity=on
+jk2coop gfx --set widescreen=on --no-build    # apply patches only (rebuild yourself later)
+jk2coop gfx --set widescreen=on --no-install  # apply + build, but don't restage
+```
+
+The interactive selector shows each feature's current state and flags pending
+changes; press <kbd>enter</kbd> to apply, <kbd>q</kbd> to cancel. Applying runs
+the full pipeline — reset → reapply → `cmake --build` → `jk2coop install` — so
+the engine is ready to launch when it finishes. It only restages the engine and
+gamecode; the optional asset mods (AI textures, upscale) are left to
+`jk2coop install` and are never triggered here.
+
+Most of these features are also live cvars (`r_aspectCorrect2D`,
+`cg_hudEdgeAnchor`, `r_overBrightBits*`), so for day-to-day tweaking you can
+toggle them from the console without a rebuild — see
+[widescreen.md](widescreen.md) and [render-fidelity.md](render-fidelity.md).
+Use `jk2coop gfx` when you want a feature's code compiled out entirely (for
+example to A/B against stock behavior).
 
 ## Development
 

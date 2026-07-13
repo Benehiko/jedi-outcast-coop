@@ -10,7 +10,7 @@ pipeline inherited from the Quake 3 / JK2 era. It is the renderer this
 co-op build ships, and it is not being replaced (see
 [Why not a modern renderer](#why-not-a-modern-renderer)). Everything here
 works *within* that renderer: an engine fix (patch
-[`0025`](../patches/0025-software-overbright-render-fidelity.patch)) plus a
+[`0024-render-fidelity`](../patches/0024-render-fidelity.patch)) plus a
 cvar preset the installers write.
 
 ## Why models look worse in-game than in Blender
@@ -62,7 +62,7 @@ borderless/windowed. In both cases overbright is forced to `0` and the
 world/model lighting goes flat and dark. That's the biggest reason the
 in-game image looks worse than the source assets on a current machine.
 
-## The fix: software overbright (patch 0025)
+## The fix: software overbright (patch 0024, render fidelity)
 
 The engine already has everything needed to apply overbright *without* the
 hardware gamma ramp. When no hardware gamma is available,
@@ -71,7 +71,7 @@ overbright `<< shift` — straight into textures and lightmaps at upload
 time. The only thing stopping it was the unconditional "force off" above.
 
 Patch
-[`0025-software-overbright-render-fidelity.patch`](../patches/0025-software-overbright-render-fidelity.patch)
+[`0024-render-fidelity.patch`](../patches/0024-render-fidelity.patch)
 adds a cvar that gates that fallback:
 
 | Cvar | Default | Meaning |
@@ -95,7 +95,7 @@ hull lighting.
 Because textures are scaled at load, this is a latched cvar — it takes
 effect on the next engine start, before the first map loads.
 
-### Models were still dark: entity lighting (patch 0027)
+### Models were still dark: entity lighting
 
 Software overbright fixed the *world* but left character models dark and flat
 against the newly-lit floor and walls. The two are lit by different code:
@@ -117,7 +117,7 @@ back to the ambient term alone; measured with `r_debugLight 1`, that ambient sat
 around 40/255 while the lit floor was near full.
 
 Patch
-[`0027-entity-lighting-overbright.patch`](../patches/0027-entity-lighting-overbright.patch)
+[`0024-render-fidelity.patch`](../patches/0024-render-fidelity.patch)
 re-applies the missing factor to entity `ambient`/`directed` light — and lifts
 the ambient ceiling from `identityLightByte` to full 255 to match — **only on the
 software-overbright path** (`r_overBrightBitsSoftware` on and overbright active).
@@ -149,7 +149,7 @@ preset is chosen with `--render high|classic` (Linux/macOS) or
 
 | Cvar | Value | Effect |
 |---|---|---|
-| `r_overBrightBitsSoftware` | `1` | Enable software overbright (patch 0025). |
+| `r_overBrightBitsSoftware` | `1` | Enable software overbright (render-fidelity patch). |
 | `r_overBrightBits` | `1` | Restore lightmap overbright punch. |
 | `r_mapOverBrightBits` | `2` | One step above `r_overBrightBits` so lightmaps keep their boost on the software path (see note above). |
 | `r_gamma` | `1.0` | Neutral gamma. A high saved value (the video-menu Brightness slider stores it, often ~2) washes the picture out and cancels the overbright contrast. Not latched — raise it live if a display needs it. |
