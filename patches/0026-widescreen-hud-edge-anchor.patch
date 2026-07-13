@@ -1,0 +1,527 @@
+--- a/code/cgame/cg_public.h
++++ b/code/cgame/cg_public.h
+@@ -221,6 +221,8 @@
+ 
+ 	CG_OPENJK_MENU_PAINT,
+ 	CG_OPENJK_GETMENU_BYNAME,
++
++	CG_R_SET2DWIDE,		// widescreen HUD edge anchoring
+ } cgameImport_t;
+ 
+ #ifdef JK2_MODE
+@@ -346,6 +348,8 @@
+ 
+ 	CG_OPENJK_MENU_PAINT_JK2,
+ 	CG_OPENJK_GETMENU_BYNAME_JK2,
++
++	CG_R_SET2DWIDE_JK2,		// widescreen HUD edge anchoring
+ } cgameJK2Import_t;
+ #endif
+ 
+--- a/code/client/cl_cgame.cpp
++++ b/code/client/cl_cgame.cpp
+@@ -1096,6 +1096,9 @@
+ 		case CG_OPENJK_GETMENU_BYNAME_JK2:
+ 			return CG_OPENJK_GETMENU_BYNAME;
+ 			break;
++		case CG_R_SET2DWIDE_JK2:
++			return CG_R_SET2DWIDE;
++			break;
+ 	}
+ 	return (cgameImport_t)-1;
+ }
+@@ -1348,6 +1351,9 @@
+ 	case CG_R_SCISSOR:
+ 		re.Scissor( VMF(1), VMF(2), VMF(3), VMF(4));
+ 		return 0;
++	case CG_R_SET2DWIDE:
++		re.Set2DWide( (qboolean)(args[1] != 0) );
++		return 0;
+ 	case CG_GETGLCONFIG:
+ 		CL_GetGlconfig( (glconfig_t *) VMA(1) );
+ 		return 0;
+--- a/code/rd-common/tr_public.h
++++ b/code/rd-common/tr_public.h
+@@ -190,6 +190,10 @@
+ 		float s1, float t1, float s2, float t2, float a1, qhandle_t hShader );	// 0 = white
+ 	void	(*DrawRotatePic2) ( float x, float y, float w, float h,
+ 		float s1, float t1, float s2, float t2, float a1, qhandle_t hShader );	// 0 = white
++	// Widescreen HUD edge anchoring: qtrue makes subsequently recorded 2D pics
++	// replay under a full-width edge-anchored ortho instead of the pillarboxed 4:3
++	// one, so corner HUD widgets can ride the true screen edges on ultrawide.
++	void	(*Set2DWide)( qboolean wide );
+ 	void	(*LAGoggles)(void);
+ 	void	(*Scissor) ( float x, float y, float w, float h);	// 0 = white
+ 
+--- a/code/rd-vanilla/tr_backend.cpp
++++ b/code/rd-vanilla/tr_backend.cpp
+@@ -972,8 +972,9 @@
+ 
+ ================
+ */
+-void	RB_SetGL2D (void) {
++void	RB_SetGL2D ( qboolean wide ) {
+ 	backEnd.projection2D = qtrue;
++	backEnd.current2Dwide = wide;
+ 
+ 	// The 2D HUD and menus are authored in a fixed 640x480 (4:3) virtual space.
+ 	// Stretching that across a wider framebuffer distorts every element, which
+@@ -983,20 +984,42 @@
+ 	// shape. The 3D world view still fills the screen (its FOV is widened
+ 	// separately by cg_fovAspectAdjust). r_aspectCorrect2D disables this to
+ 	// restore the legacy full-width stretch.
++	//
++	// The corner HUD widgets, however, should ride the true screen edges rather
++	// than the pillarbox band. When a draw command is flagged `wide` the HUD code
++	// (CG_DrawHUD) has already shifted its X coordinates into the former bars, so
++	// here we map the 640x480 space across the full framebuffer with square pixels
++	// by widening the horizontal ortho extent symmetrically. Virtual X then runs
++	// [-halfExtra, 640+halfExtra] edge to edge, so a widget shifted to virtual
++	// -halfExtra lands exactly at the left screen edge. Only meaningful when the
++	// framebuffer is wider than 4:3 and aspect correction is on; otherwise the
++	// wide path is identical to the normal path.
+ 	int x = 0, y = 0, w = glConfig.vidWidth, h = glConfig.vidHeight;
++	float orthoLeft = 0.0f, orthoRight = 640.0f;
+ 	if ( r_aspectCorrect2D && r_aspectCorrect2D->integer && glConfig.vidHeight > 0 )
+ 	{
+ 		const float aspect = (float)glConfig.vidWidth / (float)glConfig.vidHeight;
+ 		const float target = 640.0f / 480.0f;
+ 		if ( aspect > target )
+ 		{
+-			// too wide: pillarbox (bars left and right)
+-			w = (int)( glConfig.vidHeight * target + 0.5f );
+-			x = ( glConfig.vidWidth - w ) / 2;
++			if ( wide )
++			{
++				// edge-anchored HUD: fill the width, widen the ortho so pixels stay square
++				const float halfExtra = ( 640.0f * ( aspect / target ) - 640.0f ) * 0.5f;
++				orthoLeft = -halfExtra;
++				orthoRight = 640.0f + halfExtra;
++			}
++			else
++			{
++				// too wide: pillarbox (bars left and right)
++				w = (int)( glConfig.vidHeight * target + 0.5f );
++				x = ( glConfig.vidWidth - w ) / 2;
++			}
+ 		}
+ 		else if ( aspect < target )
+ 		{
+-			// too tall: letterbox (bars top and bottom)
++			// too tall: letterbox (bars top and bottom). Nothing to widen, so the
++			// wide flag is a no-op here and falls through to the pillarboxed path.
+ 			h = (int)( glConfig.vidWidth / target + 0.5f );
+ 			y = ( glConfig.vidHeight - h ) / 2;
+ 		}
+@@ -1007,7 +1030,7 @@
+ 	qglScissor( x, y, w, h );
+ 	qglMatrixMode(GL_PROJECTION);
+     qglLoadIdentity ();
+-	qglOrtho (0, 640, 480, 0, 0, 1);
++	qglOrtho (orthoLeft, orthoRight, 480, 0, 0, 1);
+ 	qglMatrixMode(GL_MODELVIEW);
+     qglLoadIdentity ();
+ 
+@@ -1055,8 +1078,14 @@
+ 
+ 	cmd = (const stretchPicCommand_t *)data;
+ 
+-	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++	// Re-program the 2D ortho when entering 2D or when this command wants a
++	// different ortho than the one currently set. Verts already batched belong to
++	// the previous projection, so flush them before switching.
++	if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++		if ( tess.numIndexes ) {
++			RB_EndSurface();
++		}
++		RB_SetGL2D( (qboolean)cmd->wide );
+ 	}
+ 
+ 	shader = cmd->shader;
+@@ -1134,8 +1163,11 @@
+ 
+ 	shader = cmd->shader;
+ 
+-	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++	if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++		if ( tess.numIndexes ) {
++			RB_EndSurface();
++		}
++		RB_SetGL2D( (qboolean)cmd->wide );
+ 	}
+ 
+ 	shader = cmd->shader;
+@@ -1225,8 +1257,11 @@
+ 	// FIXME is this needed
+ 	if ( shader->numUnfoggedPasses )
+ 	{
+-		if ( !backEnd.projection2D ) {
+-			RB_SetGL2D();
++		if ( !backEnd.projection2D || backEnd.current2Dwide != (qboolean)cmd->wide ) {
++			if ( tess.numIndexes ) {
++				RB_EndSurface();
++			}
++			RB_SetGL2D( (qboolean)cmd->wide );
+ 		}
+ 
+ 		shader = cmd->shader;
+@@ -1313,7 +1348,7 @@
+ 
+ 	if ( !backEnd.projection2D )
+ 	{
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 
+ 	if (cmd->x >= 0)
+@@ -1505,7 +1540,7 @@
+ 	//int		start, end;
+ 
+ 	if ( !backEnd.projection2D ) {
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 
+ 	qglFinish();
+--- a/code/rd-vanilla/tr_cmds.cpp
++++ b/code/rd-vanilla/tr_cmds.cpp
+@@ -26,6 +26,12 @@
+ 
+ #include "tr_local.h"
+ 
++// Widescreen HUD edge anchoring. When non-zero, the next recorded 2D draw
++// commands are tagged to replay under the full-width edge-anchored ortho instead
++// of the pillarboxed 4:3 one. Toggled by the cgame around the corner HUD paint via
++// the Set2DWide export, and copied onto each command so the flag survives into the
++// deferred backend replay (a plain cvar cannot, as it is read after cgame returns).
++int	r_2Dwide = 0;
+ 
+ /*
+ =====================
+@@ -246,6 +252,7 @@
+ 	cmd->t1 = t1;
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
++	cmd->wide = r_2Dwide;
+ }
+ 
+ /*
+@@ -275,6 +282,7 @@
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
+ 	cmd->a = a;
++	cmd->wide = r_2Dwide;
+ }
+ 
+ /*
+@@ -305,6 +313,21 @@
+ 	cmd->s2 = s2;
+ 	cmd->t2 = t2;
+ 	cmd->a = a;
++	cmd->wide = r_2Dwide;
++}
++
++/*
++=============
++RE_Set2DWide
++
++Select which 2D ortho subsequently recorded stretch/rotate-pic commands replay
++under: qtrue = full-width edge-anchored (widescreen HUD), qfalse = pillarboxed
++4:3. The flag is stored per command, so the on/off brackets the cgame records
++around the HUD paint are honoured in order at backend replay.
++=============
++*/
++void RE_Set2DWide( qboolean wide ) {
++	r_2Dwide = wide ? 1 : 0;
+ }
+ 
+ void RE_LAGoggles( void )
+--- a/code/rd-vanilla/tr_draw.cpp
++++ b/code/rd-vanilla/tr_draw.cpp
+@@ -119,10 +119,10 @@
+ 	}
+ 
+ 
+-	extern void	RB_SetGL2D (void);
++	extern void	RB_SetGL2D ( qboolean wide );
+ 	if (!backEnd.projection2D)
+ 	{
+-		RB_SetGL2D();
++		RB_SetGL2D( qfalse );
+ 	}
+ 	qglColor3f( tr.identityLight, tr.identityLight, tr.identityLight );
+ 
+@@ -498,8 +498,8 @@
+ 
+ 		if (iDissolvePercentage <= 100)
+ 		{
+-			extern void	RB_SetGL2D (void);
+-			RB_SetGL2D();
++			extern void	RB_SetGL2D ( qboolean wide );
++			RB_SetGL2D( qfalse );
+ 
+ //			GLdouble glD;
+ //			qglGetDoublev(GL_DEPTH_CLEAR_VALUE,&glD);
+--- a/code/rd-vanilla/tr_init.cpp
++++ b/code/rd-vanilla/tr_init.cpp
+@@ -250,8 +250,8 @@
+ 	}
+ 	else
+ 	{
+-		extern void	RB_SetGL2D (void);
+-		RB_SetGL2D();
++		extern void	RB_SetGL2D ( qboolean wide );
++		RB_SetGL2D( qfalse );
+ 
+ 		GL_Bind( pImage );
+ 		GL_State(GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO);
+@@ -2041,6 +2041,7 @@
+ 	re.DrawStretchPic = RE_StretchPic;
+ 	re.DrawRotatePic = RE_RotatePic;
+ 	re.DrawRotatePic2 = RE_RotatePic2;
++	REX(Set2DWide);
+ 	REX(LAGoggles);
+ 	REX(Scissor);
+ 
+--- a/code/rd-vanilla/tr_local.h
++++ b/code/rd-vanilla/tr_local.h
+@@ -939,6 +939,7 @@
+ 	qboolean	skyRenderedThisView;	// flag for drawing sun
+ 
+ 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
++	qboolean	current2Dwide;	// which 2D ortho is programmed: qtrue = full-width edge-anchored, qfalse = pillarboxed 4:3
+ 	byte		color2D[4];
+ 	qboolean	vertexes2D;		// shader needs to be finished
+ 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
+@@ -1738,6 +1739,7 @@
+ 	float	w, h;
+ 	float	s1, t1;
+ 	float	s2, t2;
++	int		wide;	// 1 = draw under the full-width edge-anchored 2D ortho (widescreen HUD), 0 = pillarboxed 4:3
+ } stretchPicCommand_t;
+ 
+ typedef struct {
+@@ -1748,6 +1750,7 @@
+ 	float	s1, t1;
+ 	float	s2, t2;
+ 	float	a;
++	int		wide;	// 1 = draw under the full-width edge-anchored 2D ortho (widescreen HUD), 0 = pillarboxed 4:3
+ } rotatePicCommand_t;
+ 
+ typedef struct
+@@ -1816,6 +1819,7 @@
+ 					  float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
+ void RE_RotatePic2 ( float x, float y, float w, float h,
+ 					  float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
++void RE_Set2DWide( qboolean wide );
+ void RE_RenderWorldEffects(void);
+ void RE_LAGoggles( void );
+ void RE_Scissor ( float x, float y, float w, float h);
+--- a/codeJK2/cgame/cg_draw.cpp
++++ b/codeJK2/cgame/cg_draw.cpp
+@@ -751,12 +751,58 @@
+ */
+ extern void *cgi_UI_GetMenuByName( const char *menu );
+ extern void cgi_UI_Menu_Paint( void *menu, qboolean force );
++/*
++================
++CG_HUDEdgeShift
++
++Widescreen HUD edge anchoring. On a framebuffer wider than 4:3, r_aspectCorrect2D
++pillarboxes the 2D layer, which rides the corner HUD widgets inboard with the
++pillarbox band. Return the number of 640-space virtual pixels to shift each side
++outward so the widgets sit at the true screen edges instead: left widgets by
++-shift, right widgets by +shift. Returns 0 when there is nothing to anchor
++(cg_hudEdgeAnchor off, non-widescreen, or a square/tall display), in which case
++the caller leaves the HUD pillarboxed and never flags the draws wide.
++================
++*/
++float CG_HUDEdgeShift( void )
++{
++	if ( !cg_hudEdgeAnchor.integer )
++	{
++		return 0.0f;
++	}
++	if ( cgs.glconfig.vidHeight <= 0 )
++	{
++		return 0.0f;
++	}
++	const float aspect = (float)cgs.glconfig.vidWidth / (float)cgs.glconfig.vidHeight;
++	const float target = 640.0f / 480.0f;
++	if ( aspect <= target )
++	{
++		return 0.0f;	// square or tall: the 2D layer is not pillarboxed horizontally
++	}
++	// Half of the extra virtual width the full-width ortho exposes on each side.
++	// A widget shifted by this lands exactly at the screen edge under RB_SetGL2D's
++	// wide ortho, whose virtual X runs [-halfExtra, 640+halfExtra].
++	return ( 640.0f * ( aspect / target ) - 640.0f ) * 0.5f;
++}
++
+ static void CG_DrawHUD( centity_t *cent )
+ {
+ 	int x,y,value;
++	const float hudShift = CG_HUDEdgeShift();
++	const qboolean wide = ( hudShift > 0.5f ) ? qtrue : qfalse;
+ 
+ 	if (cgi_UI_GetMenuInfo("lefthud",&x,&y))
+ 	{
++		// Anchor the left cluster to the true left edge on widescreen. The lefthud
++		// menu itself defines only a rect (no items), so nothing paints under the
++		// wide flag that we don't also shift here.
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qtrue );
++			x -= (int)( hudShift + 0.5f );
++		}
++
+ 		// Draw all the HUD elements --eez
+ 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "lefthud" ), qtrue );
+ 
+@@ -771,10 +817,22 @@
+ 		CG_DrawArmor(x,y);
+ 		CG_DrawHealth(x,y);
+ 		CG_DrawHUDLeftFrame2(x,y);
++
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qfalse );
++		}
+ 	}
+ 
+ 	if (cgi_UI_GetMenuInfo("righthud",&x,&y))
+ 	{
++		// Anchor the right cluster to the true right edge on widescreen.
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qtrue );
++			x += (int)( hudShift + 0.5f );
++		}
++
+ 		// Draw all the HUD elements --eez
+ 		cgi_UI_Menu_Paint( cgi_UI_GetMenuByName( "righthud" ), qtrue );
+ 
+@@ -801,6 +859,11 @@
+ 		CG_DrawAmmo(cent,x,y);
+ 		CG_DrawMessageLit(cent,x,y);
+ 		CG_DrawHUDRightFrame2(x,y);
++
++		if ( wide )
++		{
++			cgi_R_Set2DWide( qfalse );
++		}
+ 	}
+ }
+ 
+--- a/codeJK2/cgame/cg_local.h
++++ b/codeJK2/cgame/cg_local.h
+@@ -573,6 +573,7 @@
+ extern	vmCvar_t		cg_drawStatus;
+ extern	vmCvar_t		cg_drawHUD;
+ extern	vmCvar_t		cg_draw2D;
++extern	vmCvar_t		cg_hudEdgeAnchor;
+ extern	vmCvar_t		cg_animSpeed;
+ extern	vmCvar_t		cg_debugAnim;
+ extern	vmCvar_t		cg_debugSaber;
+@@ -1037,6 +1038,12 @@
+ 	float s1, float t1, float s2, float t2,float a, qhandle_t hShader );
+ void	cgi_R_LAGoggles( void );
+ void	cgi_R_Scissor( float x, float y, float w, float h);
++void	cgi_R_Set2DWide( qboolean wide );
++
++// Widescreen HUD edge anchoring: 640-space pixels to shift a corner widget
++// outward (left widgets by -shift, right by +shift) so it rides the true screen
++// edge; 0 when there is nothing to anchor. See CG_DrawHUD / CG_DrawIconBackground.
++float	CG_HUDEdgeShift( void );
+ 
+ // The glconfig_t will not change during the life of a cgame.
+ // If it needs to change, the entire cgame will be restarted, because
+--- a/codeJK2/cgame/cg_main.cpp
++++ b/codeJK2/cgame/cg_main.cpp
+@@ -285,6 +285,7 @@
+ vmCvar_t	cg_fov;
+ vmCvar_t	cg_fovAspectAdjust;
+ vmCvar_t	cg_fovSensitivityScale;
++vmCvar_t	cg_hudEdgeAnchor;
+ vmCvar_t	cg_missionstatusscreen;
+ vmCvar_t	cg_endcredits;
+ vmCvar_t	cg_updatedDataPadForcePower1;
+@@ -351,6 +352,7 @@
+ 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
+ 	{ &cg_fov, "cg_fov", "80", CVAR_ARCHIVE },
+ 	{ &cg_fovAspectAdjust, "cg_fovAspectAdjust", "0", CVAR_ARCHIVE },
++	{ &cg_hudEdgeAnchor, "cg_hudEdgeAnchor", "1", CVAR_ARCHIVE },	// 1 = anchor corner HUD to true screen edges on widescreen; 0 = keep it pillarboxed
+ 	{ &cg_fovSensitivityScale, "cg_fovSensitivityScale", "0", CVAR_ARCHIVE },	// 0 = mouse sensitivity is FOV-independent (modern); 1 = legacy JK2 behavior (sensitivity scales with fov_y/75)
+ 	{ &cg_stereoSeparation, "cg_stereoSeparation", "0.4", CVAR_ARCHIVE  },
+ 	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
+--- a/codeJK2/cgame/cg_public.h
++++ b/codeJK2/cgame/cg_public.h
+@@ -198,6 +198,8 @@
+ 
+ 	CG_OPENJK_MENU_PAINT,
+ 	CG_OPENJK_GETMENU_BYNAME,
++
++	CG_R_SET2DWIDE,		// widescreen HUD edge anchoring
+ } cgameImport_t;
+ 
+ //----------------------------------------------
+--- a/codeJK2/cgame/cg_syscalls.cpp
++++ b/codeJK2/cgame/cg_syscalls.cpp
+@@ -345,6 +345,11 @@
+ 	Q_syscall( CG_R_SCISSOR, PASSFLOAT(x), PASSFLOAT(y), PASSFLOAT(w), PASSFLOAT(h));
+ }
+ 
++void	cgi_R_Set2DWide( qboolean wide )
++{
++	Q_syscall( CG_R_SET2DWIDE, wide );
++}
++
+ void		cgi_GetGlconfig( glconfig_t *glconfig ) {
+ 	Q_syscall( CG_GETGLCONFIG, glconfig );
+ }
+--- a/codeJK2/cgame/cg_weapons.cpp
++++ b/codeJK2/cgame/cg_weapons.cpp
+@@ -1334,6 +1334,15 @@
+ 		return;
+ 	}
+ 
++	// Widescreen edge anchoring: the two side prongs pair with the corner health
++	// and ammo dials, so shift them out to the true screen edges (left prong by
++	// -shift, right prong by +shift) while the centred icon background arc stays
++	// pillarboxed. hudShift is 0 on 4:3 / when the feature is off, leaving the
++	// original layout untouched.
++	const float hudShift = CG_HUDEdgeShift();
++	const qboolean wide = ( hudShift > 0.5f ) ? qtrue : qfalse;
++	const int prongShift = wide ? (int)( hudShift + 0.5f ) : 0;
++
+ 	prongLeftX =x2+37;
+ 	prongRightX =x2+544;
+ 
+@@ -1377,8 +1386,10 @@
+ 		}
+ 
+ 		cgi_R_SetColor( colorTable[CT_WHITE] );
+-		CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, cgs.media.weaponProngsOff);
+-		CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, cgs.media.weaponProngsOff);
++		if ( wide ) { cgi_R_Set2DWide( qtrue ); }
++		CG_DrawPic( prongLeftX+xAdd-prongShift, y2-10, 40, 80, cgs.media.weaponProngsOff);
++		CG_DrawPic( prongRightX-xAdd+prongShift, y2-10, -40, 80, cgs.media.weaponProngsOff);
++		if ( wide ) { cgi_R_Set2DWide( qfalse ); }
+ 
+ 		return;
+ 	}
+@@ -1434,8 +1445,10 @@
+ 	// Side Prongs
+ 	cgi_R_SetColor( colorTable[CT_WHITE]);
+ 	xAdd = (int) 8*cg.iconHUDPercent;
+-	CG_DrawPic( prongLeftX+xAdd, y2-10, 40, 80, background);
+-	CG_DrawPic( prongRightX-xAdd, y2-10, -40, 80, background);
++	if ( wide ) { cgi_R_Set2DWide( qtrue ); }
++	CG_DrawPic( prongLeftX+xAdd-prongShift, y2-10, 40, 80, background);
++	CG_DrawPic( prongRightX-xAdd+prongShift, y2-10, -40, 80, background);
++	if ( wide ) { cgi_R_Set2DWide( qfalse ); }
+ }
+ 
+ int cgi_UI_GetItemText(char *menuFile,char *itemName, char *text);
