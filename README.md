@@ -81,9 +81,27 @@ Hosting from the in-game console/menu and LAN discovery:
 ## The `jk2coop` tool (Go)
 
 The patch/pak/install tooling is also a single cross-platform Go binary,
-`jk2coop`. Pre-built binaries for Linux, macOS, and Windows are attached to
-every [release](https://github.com/Benehiko/jedi-outcast-coop/releases) — grab
-one and skip the build. To build it yourself you need **Go 1.26.5+**:
+`jk2coop`.
+
+### Download a pre-built binary
+
+Pre-built binaries for Linux, macOS, and Windows (amd64 + arm64) are attached to
+every tagged release on the
+**[Releases page](https://github.com/Benehiko/jedi-outcast-coop/releases)**.
+Grab the archive for your platform and skip the build. Asset names are
+`jk2coop_<version>_<os>_<arch>.<ext>` (`.tar.gz` for Linux/macOS, `.zip` for
+Windows):
+
+```sh
+# Linux (amd64) — replace v0.1.0 with the latest release tag
+curl -LO https://github.com/Benehiko/jedi-outcast-coop/releases/download/v0.1.0/jk2coop_v0.1.0_linux_amd64.tar.gz
+tar -xzf jk2coop_v0.1.0_linux_amd64.tar.gz
+./jk2coop version
+```
+
+### Build it yourself
+
+You need **Go 1.26.5+**:
 
 ```sh
 make build            # produces ./jk2coop (version metadata baked in)
@@ -91,7 +109,9 @@ make build            # produces ./jk2coop (version metadata baked in)
 go build -mod=vendor -o jk2coop .
 ```
 
-Dependencies are vendored, so the build is offline and reproducible. Then:
+Dependencies are vendored, so the build is offline and reproducible.
+
+### Running it
 
 ```sh
 ./jk2coop patches apply          # apply the co-op patches to the submodule
@@ -101,9 +121,39 @@ Dependencies are vendored, so the build is offline and reproducible. Then:
 ./jk2coop --help                 # full command list
 ```
 
-Development targets: `make fmt` (gofumpt + goimports), `make lint` (mirrors CI),
-`make test` (race), `make hooks` (enable the pre-commit hook). Full command
-reference and design notes: [docs/tooling.md](docs/tooling.md).
+Run any subcommand with `--help` for its flags. Full command reference and
+design notes live in [docs/tooling.md](docs/tooling.md).
+
+### Shell autocompletion
+
+`jk2coop` generates completion scripts for **bash, zsh, fish, and PowerShell**
+(via `jk2coop completion <shell>`). Load them so `<Tab>` completes subcommands
+and flags:
+
+```sh
+# Bash (current shell)
+source <(jk2coop completion bash)
+# Bash (persistent) — Linux
+jk2coop completion bash | sudo tee /etc/bash_completion.d/jk2coop >/dev/null
+
+# Zsh (persistent) — ensure `autoload -U compinit && compinit` is in your ~/.zshrc
+jk2coop completion zsh > "${fpath[1]}/_jk2coop"
+
+# Fish
+jk2coop completion fish > ~/.config/fish/completions/jk2coop.fish
+```
+
+```powershell
+# PowerShell (current session) — add to $PROFILE to persist
+jk2coop completion powershell | Out-String | Invoke-Expression
+```
+
+See `jk2coop completion <shell> --help` for per-shell details.
+
+### Development
+
+`make fmt` (gofumpt + goimports), `make lint` (mirrors CI), `make test` (race),
+`make hooks` (enable the pre-commit hook).
 
 ## Documentation
 
