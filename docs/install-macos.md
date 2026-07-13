@@ -98,6 +98,17 @@ tools/install-coop-macos.sh --no-optional      # core install only
 The AI-texture mods need an AMD ROCm GPU container (Linux-only); on macOS they
 are offered but resolve to a printed command rather than run.
 
+### Combat and render presets
+
+As on Linux, two cvar-only presets are written to `base/` and default on
+(revertible; `--uninstall` removes them):
+
+- `--combat modern|classic` (default `modern`) — see
+  [modern-combat.md](modern-combat.md).
+- `--render high|classic` (default `high`) — sharper textures, anisotropic
+  filtering, and the software-overbright lighting fix (matters in
+  windowed/borderless); see [render-fidelity.md](render-fidelity.md).
+
 > **Note:** the macOS installer's logic has been validated against a mock
 > build tree, but has not yet been exercised end-to-end on a real Mac. If you
 > hit a snag, please open an issue.

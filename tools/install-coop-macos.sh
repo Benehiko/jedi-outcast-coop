@@ -47,6 +47,9 @@
 #   --no-skip-cutscenes  Never auto-skip cutscenes (suppress the prompt).
 #   --sensitivity N   Base mouse sensitivity for modern mode (default 0.5; the
 #                     JK2 engine default is 5). Ignored with --combat classic.
+#   --render MODE     Render fidelity: 'high' (default; sharper textures, better
+#                     filtering, software-overbright lighting fix) or 'classic'
+#                     (retail engine defaults). See docs/render-fidelity.md.
 #   --all             Enable every optional mod above.
 #   --no-optional     Skip all optional-mod prompts (core install only).
 #   --yes, -y         Assume "yes" to prompts that would otherwise be shown.
@@ -139,6 +142,10 @@ OPT_SKIPCUTSCENES=ask
 # Base mouse sensitivity for modern combat (engine default is 5). Modern mode
 # only; classic leaves the engine/user value alone.
 MOUSE_SENSITIVITY=0.5
+
+# Render fidelity preset (see install-coop.sh for the rationale). high | classic.
+# Written to base/autoexec_render.cfg, exec'd from autoexec_sp.cfg.
+RENDER_QUALITY=high
 
 is_interactive() { [[ -t 0 ]]; }
 
@@ -253,6 +260,53 @@ do_uninstall() {
 # Runs after the core install. For each mod, resolves the opt-in decision, and
 # if yes either builds+links the pak or (for GPU mods, always on macOS) prints
 # the exact command to run later. All installed paks are manifest-tracked.
+# Write autoexec_render.cfg with the render-fidelity preset (see install-coop.sh
+# for the full rationale). Exec'd from autoexec_sp.cfg. Manifest-tracked.
+write_render_config() {
+    local cfg="$BASE_DIR/autoexec_render.cfg"
+
+    {
+        echo "// Written by install-coop-macos.sh — render fidelity preset ($RENDER_QUALITY)."
+        echo "// Delete this file (or re-run with --render classic) to revert."
+        if [[ "$RENDER_QUALITY" == high ]]; then
+            echo "seta r_overBrightBitsSoftware \"1\""
+            echo "seta r_overBrightBits \"1\""
+            echo "seta r_mapOverBrightBits \"2\""
+            # Neutral gamma: a high saved r_gamma washes out the overbright.
+            echo "seta r_gamma \"1.0\""
+            echo "seta r_picmip \"0\""
+            echo "seta r_ext_compress_textures \"0\""
+            echo "seta r_texturebits \"32\""
+            echo "seta r_ext_texture_filter_anisotropic \"16\""
+            echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            # Edge anti-aliasing (MSAA); latched, falls back if unsupported.
+            echo "seta r_ext_multisample \"8\""
+            # Vsync on -- stops frame tearing (not latched).
+            echo "seta r_swapInterval \"1\""
+            echo "seta r_subdivisions \"1\""
+            echo "seta r_lodbias \"-2\""
+            echo "seta r_lodscale \"20\""
+        else
+            echo "seta r_overBrightBitsSoftware \"0\""
+            echo "seta r_overBrightBits \"0\""
+            echo "seta r_mapOverBrightBits \"0\""
+            echo "seta r_gamma \"1.0\""
+            echo "seta r_picmip \"0\""
+            echo "seta r_ext_compress_textures \"1\""
+            echo "seta r_texturebits \"0\""
+            echo "seta r_ext_texture_filter_anisotropic \"16\""
+            echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            echo "seta r_ext_multisample \"0\""
+            echo "seta r_swapInterval \"0\""
+            echo "seta r_subdivisions \"4\""
+            echo "seta r_lodbias \"0\""
+            echo "seta r_lodscale \"10\""
+        fi
+    } > "$cfg"
+    manifest_add "$cfg"
+    info "wrote autoexec_render.cfg: render=$RENDER_QUALITY"
+}
+
 # Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
 # cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
 # openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
@@ -283,9 +337,13 @@ write_combat_config() {
         echo "seta cg_fovSensitivityScale \"$sens\""
         echo "seta g_skipIntroCinematics \"$skip\""
         [[ "$COMBAT_MODE" == modern ]] && echo "seta sensitivity \"$MOUSE_SENSITIVITY\""
+        # Chain the render-fidelity preset (only autoexec_sp.cfg is auto-exec'd).
+        echo "exec autoexec_render.cfg"
     } > "$cfg"
     manifest_add "$cfg"
     info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    write_render_config
 
     # In modern mode, rescale the CONTROLS mouse-sensitivity slider so the UI can
     # reach the lower modern values. zz- override pak from the user's own menus.
@@ -510,12 +568,14 @@ while [[ $# -gt 0 ]]; do
         --no-skip-cutscenes) OPT_SKIPCUTSCENES=no; shift ;;
         --sensitivity) MOUSE_SENSITIVITY="${2:?--sensitivity needs a number}"; shift 2 ;;
         --sensitivity=*) MOUSE_SENSITIVITY="${1#*=}"; shift ;;
+        --render) RENDER_QUALITY="${2:?--render needs high|classic}"; shift 2 ;;
+        --render=*) RENDER_QUALITY="${1#*=}"; shift ;;
         --all)             OPT_WIDESCREEN=yes; OPT_TEXTURES=yes; OPT_UPSCALE=yes; shift ;;
         --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; OPT_SKIPCUTSCENES=no; shift ;;
         --yes|-y)          ASSUME_YES=1; shift ;;
         --uninstall) ACTION=uninstall; shift ;;
         -h|--help)
-            sed -n '2,53p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -524,6 +584,11 @@ done
 case "$COMBAT_MODE" in
     modern|classic) ;;
     *) die "--combat must be 'modern' or 'classic' (got: $COMBAT_MODE)" ;;
+esac
+
+case "$RENDER_QUALITY" in
+    high|classic) ;;
+    *) die "--render must be 'high' or 'classic' (got: $RENDER_QUALITY)" ;;
 esac
 
 [[ "$MOUSE_SENSITIVITY" =~ ^[0-9]+([.][0-9]+)?$ ]] || \

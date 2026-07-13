@@ -32,6 +32,15 @@ the installers can write your choice (`--combat modern|classic`,
 `--skip-cutscenes`) — see
 [docs/modern-combat.md](docs/modern-combat.md).
 
+Rendering fidelity is improved too. JK2's models are high-fidelity in
+Blender but read as flat and dark in-game, largely because the classic
+overbright lighting silently switches off on Wayland and in windowed mode.
+An engine fix restores it there (software overbright), and the installers
+default to a `--render high` preset — sharper, uncompressed textures,
+anisotropic filtering, and restored lighting punch — revertible with
+`--render classic`. See
+[docs/render-fidelity.md](docs/render-fidelity.md).
+
 In progress: syncing the campaign UI — objectives, mission text,
 cutscene handling — to joiners ([Track F](docs/campaign-ui-plan.md)).
 Current task status: [docs/tasks.md](docs/tasks.md).
@@ -59,9 +68,11 @@ files — your game install is never copied from or modified.
 
 The short version on Linux, once built ([docs/building.md](docs/building.md)):
 
-    tools/install-coop.sh              # symlinks your Steam assets + co-op gamecode into place
-    jk2coop-host                       # host a game on UDP 29070
-    jk2coop-join <host-ip>             # join it from another machine
+    jk2coop patches apply              # patch the OpenJK submodule (incl. render fidelity)
+    jk2coop install                    # symlinks your Steam assets + co-op gamecode into place
+    jk2coop launch                     # play single-player (default map kejim_post)
+    jk2coop launch --host              # host a co-op game on UDP 29070
+    jk2coop launch --join <host-ip>    # join one from another machine
 
 On Windows (from the `jk2coop-windows` CI artifact or a local build):
 
@@ -118,8 +129,19 @@ Dependencies are vendored, so the build is offline and reproducible.
 ./jk2coop pk3 coop-ui            # build the co-op UI overlay pak
 ./jk2coop install                # stage the data dir + launchers (autodetects Steam)
 ./jk2coop install --uninstall    # remove exactly what it installed
+./jk2coop launch                 # run the staged engine, single-player
+./jk2coop launch --host          # host a co-op game
+./jk2coop launch --join <addr>   # join a co-op game
 ./jk2coop --help                 # full command list
 ```
+
+`jk2coop launch` runs the same engine `install` staged (co-op gamecode,
+your linked assets, and your combat + render presets). On Unix it replaces
+the `jk2coop` process with the engine, so the game keeps running under your
+shell; on Windows it runs the engine as a child. Use `--windowed`,
+`--map <name>`, `--skip-cutscenes`, or `--print` (show the command without
+running), and pass raw engine args after `--`
+(e.g. `jk2coop launch -- +set r_mode -2`).
 
 Run any subcommand with `--help` for its flags. Full command reference and
 design notes live in [docs/tooling.md](docs/tooling.md).
@@ -163,6 +185,7 @@ See `jk2coop completion <shell> --help` for per-shell details.
 | [coop-guide.md](docs/coop-guide.md) | Hosting, finding, and joining co-op games |
 | [widescreen.md](docs/widescreen.md) | Running at QHD / 4K / ultrawide with correct HUD proportions and FOV |
 | [modern-combat.md](docs/modern-combat.md) | Modernized combat feel: FOV-independent aim, fixed screen-center crosshair, saber auto-aim off by default, faster blaster bolts (all cvar/opt-in) |
+| [render-fidelity.md](docs/render-fidelity.md) | Why models look flat in-game vs Blender, the software-overbright lighting fix, and the `--render high` texture/filtering/LOD preset |
 | [hires-textures.md](docs/hires-textures.md) | Optional: locally AI-upscale your own textures into a high-res override pak |
 | [asset-generation.md](docs/asset-generation.md) | Optional: locally generate original, non-branded material textures (Apache-licensed model); the licensing/trademark analysis |
 | [asset-formats.md](docs/asset-formats.md) | Reference: the game's file formats (`.pk3`, `.md3`, `.glm`/`.gla`, `.bsp`, …) and how to open them in Blender |

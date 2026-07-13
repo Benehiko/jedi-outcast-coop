@@ -9,6 +9,7 @@
 //	jk2coop pk3 widescreen    — build the widescreen video-menu pak
 //	jk2coop install           — stage the engine data dir + launchers
 //	jk2coop install --uninstall
+//	jk2coop launch            — run the staged engine (single-player / host / join)
 package main
 
 import (

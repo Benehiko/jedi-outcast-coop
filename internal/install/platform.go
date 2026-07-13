@@ -55,6 +55,21 @@ const (
 	defaultMap  = "kejim_post"
 )
 
+// DefaultPort is the co-op UDP port hosts listen on and joiners default to.
+const DefaultPort = defaultPort
+
+// DefaultMap is the campaign map launched when none is given.
+const DefaultMap = defaultMap
+
+// ResolveEngine returns the engine executable to run and the directory holding
+// the renderer module (the loader's fs_apppath), given the CMake build dir. It
+// is the same resolution the installer and launchers use, so `launch` runs
+// exactly the binary `install` staged. Returns ("", "") if the engine is not
+// built.
+func (p Platform) ResolveEngine(buildDir string) (bin, dir string) {
+	return resolveEngine(buildDir, p)
+}
+
 // arch resolves the build architecture from an override env var or the host.
 func arch() string {
 	if a := os.Getenv("JK2_ARCH"); a != "" {
