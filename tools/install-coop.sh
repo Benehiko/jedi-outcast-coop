@@ -263,8 +263,12 @@ do_uninstall() {
 #     (one above overBright) so R_ColorShiftLightingBytes still boosts the
 #     lightmaps by one step -- without that the overbright half-scale of textures
 #     just darkens the scene on the software path.
+#   - r_gamma 1.0: neutral gamma. A high saved r_gamma (the video-menu
+#     Brightness slider stores it, often ~2) washes out the picture and cancels
+#     the overbright contrast, so pin it back to neutral.
 #   - texture sharpness: full-res (r_picmip 0), uncompressed (no DXT banding),
 #     32-bit, 16x anisotropic, trilinear.
+#   - r_ext_multisample 8: MSAA to smooth stair-stepped polygon edges.
 #   - geometry: finer patch tessellation (r_subdivisions 1) and higher-detail
 #     model/curve LODs held further out.
 # These are latched render cvars, so they take effect on the next engine start
@@ -280,12 +284,20 @@ write_render_config() {
             echo "seta r_overBrightBitsSoftware \"1\""
             echo "seta r_overBrightBits \"1\""
             echo "seta r_mapOverBrightBits \"2\""
+            # Neutral gamma. A high saved r_gamma (the video-menu Brightness
+            # slider stores it, often ~2) washes the picture out and cancels the
+            # overbright contrast, so pin it to 1.0 for the intended look. Not
+            # latched -- users can still raise it live if a display needs it.
+            echo "seta r_gamma \"1.0\""
             # Texture fidelity.
             echo "seta r_picmip \"0\""
             echo "seta r_ext_compress_textures \"0\""
             echo "seta r_texturebits \"32\""
             echo "seta r_ext_texture_filter_anisotropic \"16\""
             echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            # Edge anti-aliasing (MSAA). Latched; falls back gracefully if the
+            # GPU can't provide the requested sample count.
+            echo "seta r_ext_multisample \"8\""
             # Geometry smoothness / LOD.
             echo "seta r_subdivisions \"1\""
             echo "seta r_lodbias \"-2\""
@@ -296,11 +308,13 @@ write_render_config() {
             echo "seta r_overBrightBitsSoftware \"0\""
             echo "seta r_overBrightBits \"0\""
             echo "seta r_mapOverBrightBits \"0\""
+            echo "seta r_gamma \"1.0\""
             echo "seta r_picmip \"0\""
             echo "seta r_ext_compress_textures \"1\""
             echo "seta r_texturebits \"0\""
             echo "seta r_ext_texture_filter_anisotropic \"16\""
             echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
+            echo "seta r_ext_multisample \"0\""
             echo "seta r_subdivisions \"4\""
             echo "seta r_lodbias \"0\""
             echo "seta r_lodscale \"10\""

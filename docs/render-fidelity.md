@@ -95,6 +95,17 @@ hull lighting.
 Because textures are scaled at load, this is a latched cvar — it takes
 effect on the next engine start, before the first map loads.
 
+### Watch out for saved gamma
+
+The video menu's Brightness slider writes `r_gamma`, and it's easy to end
+up with it cranked high (values around `2` are common). A high `r_gamma`
+flattens the whole tone curve and **cancels the overbright contrast** — the
+picture looks *brighter* but washed-out and milky, with crushed shadows and
+lost texture detail. That's the opposite of what overbright is for. The
+preset therefore also pins `r_gamma 1.0`; if your display genuinely needs
+more brightness, nudge it back up a little (`r_gamma 1.1`–`1.3`) rather than
+leaving it at a menu-set `~2`.
+
 ## The installer preset
 
 The installers write a `base/autoexec_render.cfg`, exec'd from
@@ -109,11 +120,13 @@ preset is chosen with `--render high|classic` (Linux/macOS) or
 | `r_overBrightBitsSoftware` | `1` | Enable software overbright (patch 0025). |
 | `r_overBrightBits` | `1` | Restore lightmap overbright punch. |
 | `r_mapOverBrightBits` | `2` | One step above `r_overBrightBits` so lightmaps keep their boost on the software path (see note above). |
+| `r_gamma` | `1.0` | Neutral gamma. A high saved value (the video-menu Brightness slider stores it, often ~2) washes the picture out and cancels the overbright contrast. Not latched — raise it live if a display needs it. |
 | `r_picmip` | `0` | Full-resolution textures (no mip downsampling). |
 | `r_ext_compress_textures` | `0` | Uncompressed textures — no DXT banding/blur. |
 | `r_texturebits` | `32` | 32-bit textures — no color banding. |
 | `r_ext_texture_filter_anisotropic` | `16` | 16× anisotropic filtering — crisp at grazing angles. |
 | `r_textureMode` | `GL_LINEAR_MIPMAP_LINEAR` | Trilinear filtering. |
+| `r_ext_multisample` | `8` | 8× MSAA — smooths the stair-stepped polygon edges (ship hulls against sky/rock, crate edges). Latched; the driver falls back to a lower sample count, or none, if it can't provide 8×. |
 | `r_subdivisions` | `1` | Finer patch tessellation — smoother curved geometry. |
 | `r_lodbias` | `-2` | Hold higher-detail model LODs at distance. |
 | `r_lodscale` | `20` | Push LOD transitions further out. |
