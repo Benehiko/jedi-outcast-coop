@@ -22,7 +22,30 @@ go build -mod=vendor -o jk2coop .
 
 Pre-built binaries for each platform are attached to every tagged
 [GitHub Release](https://github.com/Benehiko/jedi-outcast-coop/releases)
-(`jk2coop_<version>_<os>_<arch>.tar.gz`, `.zip` for Windows).
+(`jk2coop_<version>_<os>_<arch>.tar.gz`, `.zip` for Windows):
+
+```bash
+# replace v0.1.0 with the latest release tag
+curl -LO https://github.com/Benehiko/jedi-outcast-coop/releases/download/v0.1.0/jk2coop_v0.1.0_linux_amd64.tar.gz
+tar -xzf jk2coop_v0.1.0_linux_amd64.tar.gz
+```
+
+## Shell autocompletion
+
+The binary generates completion scripts for bash, zsh, fish, and PowerShell:
+
+```bash
+source <(jk2coop completion bash)                       # bash, current shell
+jk2coop completion zsh > "${fpath[1]}/_jk2coop"         # zsh
+jk2coop completion fish > ~/.config/fish/completions/jk2coop.fish
+```
+
+```powershell
+jk2coop completion powershell | Out-String | Invoke-Expression
+```
+
+Run `jk2coop completion <shell> --help` for how to install each one
+persistently.
 
 ## Commands
 
