@@ -127,6 +127,7 @@ preset is chosen with `--render high|classic` (Linux/macOS) or
 | `r_ext_texture_filter_anisotropic` | `16` | 16× anisotropic filtering — crisp at grazing angles. |
 | `r_textureMode` | `GL_LINEAR_MIPMAP_LINEAR` | Trilinear filtering. |
 | `r_ext_multisample` | `8` | 8× MSAA — smooths the stair-stepped polygon edges (ship hulls against sky/rock, crate edges). Latched; the driver falls back to a lower sample count, or none, if it can't provide 8×. |
+| `r_swapInterval` | `1` | Vsync on — stops the frame tearing you get with uncapped swaps when moving the camera. Not latched; applies on the next frame. |
 | `r_subdivisions` | `1` | Finer patch tessellation — smoother curved geometry. |
 | `r_lodbias` | `-2` | Hold higher-detail model LODs at distance. |
 | `r_lodscale` | `20` | Push LOD transitions further out. |

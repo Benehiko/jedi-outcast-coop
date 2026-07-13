@@ -269,6 +269,7 @@ do_uninstall() {
 #   - texture sharpness: full-res (r_picmip 0), uncompressed (no DXT banding),
 #     32-bit, 16x anisotropic, trilinear.
 #   - r_ext_multisample 8: MSAA to smooth stair-stepped polygon edges.
+#   - r_swapInterval 1: vsync on, to stop camera-motion frame tearing.
 #   - geometry: finer patch tessellation (r_subdivisions 1) and higher-detail
 #     model/curve LODs held further out.
 # These are latched render cvars, so they take effect on the next engine start
@@ -298,6 +299,9 @@ write_render_config() {
             # Edge anti-aliasing (MSAA). Latched; falls back gracefully if the
             # GPU can't provide the requested sample count.
             echo "seta r_ext_multisample \"8\""
+            # Vsync on -- stops the frame tearing you get with uncapped swaps.
+            # Not latched; applies on the next frame.
+            echo "seta r_swapInterval \"1\""
             # Geometry smoothness / LOD.
             echo "seta r_subdivisions \"1\""
             echo "seta r_lodbias \"-2\""
@@ -315,6 +319,7 @@ write_render_config() {
             echo "seta r_ext_texture_filter_anisotropic \"16\""
             echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
             echo "seta r_ext_multisample \"0\""
+            echo "seta r_swapInterval \"0\""
             echo "seta r_subdivisions \"4\""
             echo "seta r_lodbias \"0\""
             echo "seta r_lodscale \"10\""

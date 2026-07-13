@@ -398,6 +398,8 @@ function Write-RenderConfig ([string]$baseDir) {
             'seta r_textureMode "GL_LINEAR_MIPMAP_LINEAR"'
             # Edge anti-aliasing (MSAA); latched, falls back if unsupported.
             'seta r_ext_multisample "8"'
+            # Vsync on -- stops frame tearing (not latched).
+            'seta r_swapInterval "1"'
             'seta r_subdivisions "1"'
             'seta r_lodbias "-2"'
             'seta r_lodscale "20"'
@@ -416,6 +418,7 @@ function Write-RenderConfig ([string]$baseDir) {
             'seta r_ext_texture_filter_anisotropic "16"'
             'seta r_textureMode "GL_LINEAR_MIPMAP_LINEAR"'
             'seta r_ext_multisample "0"'
+            'seta r_swapInterval "0"'
             'seta r_subdivisions "4"'
             'seta r_lodbias "0"'
             'seta r_lodscale "10"'

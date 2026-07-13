@@ -281,6 +281,8 @@ write_render_config() {
             echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
             # Edge anti-aliasing (MSAA); latched, falls back if unsupported.
             echo "seta r_ext_multisample \"8\""
+            # Vsync on -- stops frame tearing (not latched).
+            echo "seta r_swapInterval \"1\""
             echo "seta r_subdivisions \"1\""
             echo "seta r_lodbias \"-2\""
             echo "seta r_lodscale \"20\""
@@ -295,6 +297,7 @@ write_render_config() {
             echo "seta r_ext_texture_filter_anisotropic \"16\""
             echo "seta r_textureMode \"GL_LINEAR_MIPMAP_LINEAR\""
             echo "seta r_ext_multisample \"0\""
+            echo "seta r_swapInterval \"0\""
             echo "seta r_subdivisions \"4\""
             echo "seta r_lodbias \"0\""
             echo "seta r_lodscale \"10\""
