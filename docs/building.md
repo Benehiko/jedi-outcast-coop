@@ -31,7 +31,8 @@ go build -mod=vendor -o jk2coop .
 ```
 
 The patches are cumulative and overlap (several touch the same lines — e.g.
-one patch sets `MAX_CLIENTS` to 2 and a later one changes it to 4). They apply
+one patch sets the `sv_maxclients` infostring to `MAX_CLIENTS` and a later one
+rewrites that same line to honour the runtime cvar). They apply
 cleanly in order to a **pristine** submodule, but `apply-patches.sh` is not
 idempotent on a dirty tree: re-running it against an already-patched submodule
 can fail on an overlapping patch. To re-apply, reset the submodule first:
