@@ -159,6 +159,71 @@ func (r *IntRow) adjust(dir int) {
 }
 func (r *IntRow) changed() bool { return *r.val != r.initial }
 
+// ResolutionRow cycles a *Resolution through "auto" (0x0) plus a fixed list of
+// common resolutions. It is rebuild-free: the values become r_customwidth /
+// r_customheight cvars written to autoexec. When a monitor resolution is
+// detected, that entry is annotated as the suggested native mode.
+type ResolutionRow struct {
+	title, desc string
+	val         *Resolution
+	initial     Resolution
+	// choices is auto (0x0) followed by the offered resolutions, in cycle order.
+	choices []Resolution
+	// suggested is the detected native resolution (0x0 if none was detected).
+	suggested Resolution
+}
+
+// NewResolutionRow builds a resolution row bound to val. suggested is the
+// detected native resolution (pass a zero Resolution if detection failed); when
+// non-zero it is guaranteed to appear in the cycle and is flagged as native.
+func NewResolutionRow(title, desc string, val *Resolution, suggested Resolution) *ResolutionRow {
+	choices := []Resolution{{}} // auto first
+	seen := map[Resolution]bool{{}: true}
+	add := func(r Resolution) {
+		if r.W > 0 && r.H > 0 && !seen[r] {
+			seen[r] = true
+			choices = append(choices, r)
+		}
+	}
+	add(suggested)
+	for _, r := range CommonResolutions {
+		add(r)
+	}
+	// Ensure the current value is selectable even if it is an odd custom size.
+	add(*val)
+	return &ResolutionRow{title: title, desc: desc, val: val, initial: *val, choices: choices, suggested: suggested}
+}
+
+func (r *ResolutionRow) Title() string { return r.title }
+func (r *ResolutionRow) Desc() string  { return r.desc }
+func (r *ResolutionRow) Rebuild() bool { return false }
+func (r *ResolutionRow) Display() string {
+	if r.val.W == 0 || r.val.H == 0 {
+		if r.suggested.W > 0 {
+			return fmt.Sprintf("auto (%dx%d)", r.suggested.W, r.suggested.H)
+		}
+		return "auto"
+	}
+	s := fmt.Sprintf("%dx%d", r.val.W, r.val.H)
+	if *r.val == r.suggested {
+		s += " (native)"
+	}
+	return s
+}
+func (r *ResolutionRow) toggle() {}
+func (r *ResolutionRow) adjust(dir int) {
+	idx := 0
+	for i, c := range r.choices {
+		if c == *r.val {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + dir + len(r.choices)) % len(r.choices)
+	*r.val = r.choices[idx]
+}
+func (r *ResolutionRow) changed() bool { return *r.val != r.initial }
+
 // FormResult is what a settings form returns after it exits.
 type FormResult struct {
 	// Confirmed is true if the user pressed enter to save; false if cancelled.

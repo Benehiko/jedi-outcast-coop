@@ -59,7 +59,7 @@ There are exactly seven user-facing commands, plus `version` and a hidden
 | `jk2coop host` | Explicitly hosts a co-op game. |
 | `jk2coop join <IP[:PORT]>` | Joins a co-op game by IP (a positional argument). |
 | `jk2coop game` | Game Settings TUI — mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes. All runtime cvars, no rebuild. |
-| `jk2coop graphics` (alias `gfx`) | Graphics Settings TUI — widescreen, lighting, MSAA, texture upscale, texture generate. Widescreen and lighting are patch-backed and offer a rebuild on change; MSAA and the texture paks are not. |
+| `jk2coop graphics` (alias `gfx`) | Graphics Settings TUI — widescreen, lighting, resolution, MSAA, texture upscale, texture generate. Widescreen and lighting are patch-backed and offer a rebuild on change; resolution, MSAA and the texture paks are not. Resolution auto-suggests the monitor's current mode. |
 | `jk2coop uninstall` | Removes exactly what the install created (manifest-tracked). |
 | `jk2coop version` | Prints version, commit, and build date. |
 
@@ -203,8 +203,8 @@ Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 ### Graphics settings (`jk2coop graphics`)
 
 `jk2coop graphics` (alias `gfx`) is the Graphics Settings TUI. It edits the
-`[graphics]` block of the config file — widescreen, lighting, MSAA, texture
-upscale, and texture generate — and applies the change:
+`[graphics]` block of the config file — widescreen, lighting, resolution, MSAA,
+texture upscale, and texture generate — and applies the change:
 
 - **`widescreen`** and **`lighting`** are patch-backed features (16:9/21:9/32:9
   2D aspect correction with edge-anchored HUD, and software-overbright lighting
@@ -213,6 +213,12 @@ upscale, and texture generate — and applies the change:
   commit and reapplying the co-op base (patches `0001`–`0021`, always on) plus
   the chosen features, then rebuilding. `jk2coop graphics` offers that rebuild
   when you change one.
+- **Resolution** (`res_width`/`res_height` → `r_mode -1` + `r_customwidth`/
+  `r_customheight`) is a runtime cvar set — no rebuild. `auto` (`0x0`) leaves the
+  engine on its own `r_mode` default; any other value forces the custom video
+  mode. The TUI auto-suggests your monitor's current resolution (detected via
+  `xrandr` on X11 or `wlr-randr` on Wayland) and flags the matching entry as
+  `native`.
 - **`msaa`** (`r_ext_multisample`: 0/2/4/8) is a runtime cvar — no rebuild.
 - **`texture_upscale`** and **`texture_generate`** place optional GPU-built
   override paks — no engine rebuild.

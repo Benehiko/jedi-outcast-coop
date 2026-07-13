@@ -58,6 +58,12 @@ type Graphics struct {
 	// MSAA is the multisample sample count written as r_ext_multisample
 	// (0 = off, else 2/4/8). Applied at next launch; no rebuild.
 	MSAA int `toml:"msaa"`
+	// ResWidth/ResHeight are the game resolution written as r_customwidth /
+	// r_customheight with r_mode -1. Both 0 means "auto": leave the engine on its
+	// own r_mode default and force no custom size. Applied at next launch; no
+	// rebuild.
+	ResWidth  int `toml:"res_width"`
+	ResHeight int `toml:"res_height"`
 	// TextureUpscale builds a Real-ESRGAN hi-res override pak from the retail
 	// textures (zzz-hires-textures.pk3). GPU + container gated; no rebuild.
 	TextureUpscale bool `toml:"texture_upscale"`
@@ -85,6 +91,8 @@ func Defaults() Config {
 			Widescreen:      true,
 			Lighting:        true,
 			MSAA:            0,
+			ResWidth:        0, // 0x0 = auto (engine picks; no forced custom mode)
+			ResHeight:       0,
 			TextureUpscale:  false,
 			TextureGenerate: false,
 		},

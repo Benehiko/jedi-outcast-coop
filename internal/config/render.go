@@ -44,6 +44,16 @@ func (c Config) AutoexecBytes() []byte {
 	// is written last and wins over any preset value.
 	b.WriteString(seta("r_ext_multisample", strconv.Itoa(c.Graphics.MSAA)))
 
+	// Resolution. A non-zero size selects the custom video mode (r_mode -1) at the
+	// requested width/height; 0x0 leaves the engine on its own r_mode so the game
+	// picks a mode as before.
+	if c.Graphics.ResWidth > 0 && c.Graphics.ResHeight > 0 {
+		b.WriteString("\n// resolution\n")
+		b.WriteString(seta("r_mode", "-1"))
+		b.WriteString(seta("r_customwidth", strconv.Itoa(c.Graphics.ResWidth)))
+		b.WriteString(seta("r_customheight", strconv.Itoa(c.Graphics.ResHeight)))
+	}
+
 	return b.Bytes()
 }
 

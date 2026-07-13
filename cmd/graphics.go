@@ -30,6 +30,11 @@ func newGraphicsCmd() *cobra.Command {
 				return err
 			}
 
+			// Bind resolution to a local pair the row mutates; copied back into cfg
+			// before save. suggested is the detected native mode (zero if none).
+			resSel := config.Resolution{W: cfg.Graphics.ResWidth, H: cfg.Graphics.ResHeight}
+			suggested, _ := config.DetectMonitor()
+
 			rows := []config.Row{
 				config.NewBoolRow("Widescreen",
 					"16:9/21:9/32:9 aspect correction, extra video modes, edge-anchored HUD.",
@@ -37,6 +42,9 @@ func newGraphicsCmd() *cobra.Command {
 				config.NewBoolRow("Lighting",
 					"Software-overbright render fidelity plus a character-model lighting boost.",
 					true, &cfg.Graphics.Lighting),
+				config.NewResolutionRow("Resolution",
+					"Game resolution (r_customwidth/height). auto lets the engine pick; native matches your monitor.",
+					&resSel, suggested),
 				config.NewEnumRow("MSAA",
 					"Multisample anti-aliasing. Higher is smoother edges, more GPU cost.",
 					false, &cfg.Graphics.MSAA,
@@ -62,6 +70,8 @@ func newGraphicsCmd() *cobra.Command {
 				cmd.Println("no changes.")
 				return nil
 			}
+			// Copy the resolution the row edited back into the config before saving.
+			cfg.Graphics.ResWidth, cfg.Graphics.ResHeight = resSel.W, resSel.H
 			path, err := cfg.Save()
 			if err != nil {
 				return err

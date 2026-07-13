@@ -89,11 +89,12 @@ Edit it with the two settings TUIs — or by hand — and it is applied to the
 game on the next `install` or `launch`:
 
     jk2coop game        # mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes
-    jk2coop graphics    # widescreen, lighting, MSAA, texture upscale/generate (alias: gfx)
+    jk2coop graphics    # widescreen, lighting, resolution, MSAA, texture upscale/generate (alias: gfx)
 
 `game` settings are all runtime cvars and take effect immediately.
 Widescreen and lighting under `graphics` are patch-backed, so changing
-them offers to rebuild the engine; MSAA and the texture paks are not.
+them offers to rebuild the engine; resolution, MSAA and the texture paks
+are not. The resolution row auto-suggests your monitor's current mode.
 
 Hosting from the in-game console/menu and LAN discovery:
 [docs/coop-guide.md](docs/coop-guide.md).
