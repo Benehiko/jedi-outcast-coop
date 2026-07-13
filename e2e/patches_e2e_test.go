@@ -110,7 +110,7 @@ func TestPatchesApplyToPristineSubmodule(t *testing.T) {
 	resetSubmodule(t, root)
 	t.Cleanup(func() { resetSubmodule(t, root) })
 
-	out := run(t, t.Context(), root, bin, "patches", "apply")
+	out := run(t, t.Context(), root, bin, "dev", "patches", "apply")
 	t.Logf("patches apply output:\n%s", out)
 
 	// Every patch file must be reported as applied (none skipped) on a clean tree.
@@ -142,10 +142,10 @@ func TestPatchesApplyNotIdempotentOnDirtyTree(t *testing.T) {
 	t.Cleanup(func() { resetSubmodule(t, root) })
 
 	// First apply: clean.
-	run(t, t.Context(), root, bin, "patches", "apply")
+	run(t, t.Context(), root, bin, "dev", "patches", "apply")
 
 	// Second apply on the now-dirty tree must fail with the reset guidance.
-	cmd := exec.CommandContext(t.Context(), bin, "patches", "apply")
+	cmd := exec.CommandContext(t.Context(), bin, "dev", "patches", "apply")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err == nil {

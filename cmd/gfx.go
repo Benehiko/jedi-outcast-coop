@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/Benehiko/jedi-outcast-coop/internal/config"
 	"github.com/Benehiko/jedi-outcast-coop/internal/gfx"
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
@@ -191,24 +192,22 @@ func runSelector(current map[string]bool) (gfx.Result, error) {
 	return rr.RunResult(), nil
 }
 
-// reinstall re-stages the freshly built engine. It deliberately leaves the
-// optional asset mods (widescreen menu, AI textures, Real-ESRGAN upscale) OFF:
-// gfx only rebuilds the engine, and those mods are a separate `jk2coop install`
-// concern that can be slow and GPU-bound. The user's existing installed mods are
-// untouched (install is idempotent and only adds what's requested).
+// reinstall re-stages the freshly built engine from the current config. This is
+// the low-level `dev gfx` path; normal users go through `jk2coop graphics` +
+// `jk2coop install`. Install is idempotent and config-driven.
 func reinstall(ctx context.Context, root, buildDir string, cmd *cobra.Command) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	p := install.DetectPlatform(buildDir)
 	opts := &install.Options{
-		RepoRoot:      root,
-		BuildDir:      buildDir,
-		Combat:        install.CombatModern,
-		Widescreen:    install.OptNo,
-		Textures:      install.OptNo,
-		Upscale:       install.OptNo,
-		SkipCutscenes: install.OptNo,
-		AssumeYes:     true,
-		Out:           cmd.OutOrStdout(),
-		Prompt:        stdinPrompt(cmd),
+		RepoRoot:  root,
+		BuildDir:  buildDir,
+		Config:    &cfg,
+		AssumeYes: true,
+		Out:       cmd.OutOrStdout(),
+		Prompt:    stdinPrompt(cmd),
 	}
 	return install.Install(ctx, p, opts)
 }
