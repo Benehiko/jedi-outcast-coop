@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,8 @@ func newInstallCmd() *cobra.Command {
 		repo, buildDir, gamedata          string
 		uninstall, all, noOptional, yes   bool
 		withWide, withTextures, withUpscl bool
+		combat, sensitivity               string
+		skipCutscenes, noSkipCutscenes    bool
 	)
 
 	cmd := &cobra.Command{
@@ -37,17 +40,27 @@ func newInstallCmd() *cobra.Command {
 				buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
 			}
 
+			if combat != install.CombatModern && combat != install.CombatClassic {
+				return fmt.Errorf("--combat must be %q or %q (got: %q)", install.CombatModern, install.CombatClassic, combat)
+			}
+			if !numberRe.MatchString(sensitivity) {
+				return fmt.Errorf("--sensitivity must be a non-negative number (got: %q)", sensitivity)
+			}
+
 			p := install.DetectPlatform(buildDir)
 			opts := &install.Options{
-				RepoRoot:   root,
-				BuildDir:   buildDir,
-				GameData:   gamedata,
-				Widescreen: resolveState(all, noOptional, withWide),
-				Textures:   resolveState(all, noOptional, withTextures),
-				Upscale:    resolveState(all, noOptional, withUpscl),
-				AssumeYes:  yes,
-				Out:        cmd.OutOrStdout(),
-				Prompt:     stdinPrompt(cmd),
+				RepoRoot:      root,
+				BuildDir:      buildDir,
+				GameData:      gamedata,
+				Widescreen:    resolveState(all, noOptional, withWide),
+				Textures:      resolveState(all, noOptional, withTextures),
+				Upscale:       resolveState(all, noOptional, withUpscl),
+				Combat:        combat,
+				Sensitivity:   sensitivity,
+				SkipCutscenes: resolveCutscenes(noOptional, skipCutscenes, noSkipCutscenes),
+				AssumeYes:     yes,
+				Out:           cmd.OutOrStdout(),
+				Prompt:        stdinPrompt(cmd),
 			}
 
 			if uninstall {
@@ -68,7 +81,27 @@ func newInstallCmd() *cobra.Command {
 	f.BoolVar(&all, "all", false, "enable every optional mod")
 	f.BoolVar(&noOptional, "no-optional", false, "skip all optional-mod prompts (core install only)")
 	f.BoolVarP(&yes, "yes", "y", false, "assume \"yes\" to prompts (non-interactive)")
+	f.StringVar(&combat, "combat", install.CombatModern, "combat feel: modern | classic")
+	f.StringVar(&sensitivity, "sensitivity", install.DefaultSensitivity, "base mouse sensitivity for modern combat")
+	f.BoolVar(&skipCutscenes, "skip-cutscenes", false, "auto-skip scripted map-intro cutscenes")
+	f.BoolVar(&noSkipCutscenes, "no-skip-cutscenes", false, "never auto-skip cutscenes (suppress the prompt)")
 	return cmd
+}
+
+// numberRe matches a non-negative decimal (used to validate --sensitivity).
+var numberRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+
+// resolveCutscenes maps the cutscene flags to an install.OptState. --no-optional
+// and --no-skip-cutscenes force off; --skip-cutscenes forces on; else "ask".
+func resolveCutscenes(noOptional, skip, noSkip bool) install.OptState {
+	switch {
+	case noOptional, noSkip:
+		return install.OptNo
+	case skip:
+		return install.OptYes
+	default:
+		return install.OptAsk
+	}
 }
 
 // resolveState maps the mutually-influencing flags to an install.OptState.

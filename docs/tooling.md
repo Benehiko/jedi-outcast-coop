@@ -34,6 +34,7 @@ Every subcommand maps 1:1 to one of the original scripts:
 | `jk2coop pk3 coop-ui` | `build-coop-ui-pk3.sh` | Packs `assets/coop-ui/ui` into `zz-coop-ui.pk3`. |
 | `jk2coop pk3 coop-npcs <GameData/base>` | `build-coop-npcs-pk3.sh` | Extracts the retail NPC config and repackages it as `zzz-coop-npcs.pk3`. |
 | `jk2coop pk3 widescreen` | `build-widescreen-menu-pk3.sh` | Patches the SP video-menu resolution list into `zz-widescreen-menu.pk3`. |
+| `jk2coop pk3 sensitivity` | `build-sensitivity-menu-pk3.sh` | Rescales the SP CONTROLS mouse-sensitivity slider into `zz-sensitivity-menu.pk3`. |
 | `jk2coop install` | `install-coop.sh` / `install-coop-macos.sh` / `install-coop.ps1` | Stages the data dir (symlinks + gamecode) and installs the launchers. OS-detected. |
 | `jk2coop install --uninstall` | `… --uninstall` | Removes exactly what the install created (manifest-tracked). |
 | `jk2coop version` | — | Prints version, commit, and build date. |
@@ -57,6 +58,22 @@ jk2coop install --no-optional         # core install only, no prompts
 jk2coop install --yes                 # assume "yes" to prompts (non-interactive)
 jk2coop install --uninstall           # remove everything it created
 ```
+
+**Modern combat feel.** The install always writes `base/autoexec_sp.cfg` (the
+engine execs it at startup, so it wins over a stale `openjo_sp.cfg`) with the
+combat cvars, matching `install-coop.sh`:
+
+```bash
+jk2coop install --combat modern       # default: free aim, fixed crosshair, FOV-independent sensitivity, fast bolts
+jk2coop install --combat classic      # legacy feel (auto-aim, dynamic crosshair, FOV-linked sensitivity)
+jk2coop install --sensitivity 0.7     # base mouse sensitivity for modern mode (default 0.5)
+jk2coop install --skip-cutscenes      # auto-skip scripted map-intro cutscenes
+jk2coop install --no-skip-cutscenes   # never auto-skip (suppress the prompt)
+```
+
+In `modern` mode the install also builds `zz-sensitivity-menu.pk3` so the
+CONTROLS slider can reach the lower modern range (retail min is 2). See
+[modern-combat.md](modern-combat.md).
 
 Platform layout (overridable via the same `JK2_*` env vars the scripts use):
 

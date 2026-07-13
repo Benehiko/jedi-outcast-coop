@@ -16,6 +16,15 @@ import (
 func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, gamedata, baseDir string) error {
 	any := false
 
+	// --- Modern combat feel + optional cutscene skip ----------------------
+	// Always writes autoexec_sp.cfg (the engine execs it at startup) so the
+	// combat cvars win over any stale openjo_sp.cfg. --combat classic restores
+	// the legacy feel; cutscene auto-skip is a separate opt-in.
+	if err := writeCombatConfig(man, opts, baseDir); err != nil {
+		return err
+	}
+	any = true
+
 	// --- Widescreen / QHD / ultrawide video-menu modes --------------------
 	yes, err := opts.resolveOpt(opts.Widescreen,
 		"Add widescreen / QHD / ultrawide / 4K resolutions to the video menu?")

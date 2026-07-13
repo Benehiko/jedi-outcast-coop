@@ -15,7 +15,7 @@ func newPk3Cmd() *cobra.Command {
 		Use:   "pk3",
 		Short: "Build the override paks (co-op UI, co-op NPCs, widescreen menu)",
 	}
-	cmd.AddCommand(newPk3CoopUICmd(), newPk3CoopNPCsCmd(), newPk3WidescreenCmd())
+	cmd.AddCommand(newPk3CoopUICmd(), newPk3CoopNPCsCmd(), newPk3WidescreenCmd(), newPk3SensitivityCmd())
 	return cmd
 }
 
@@ -107,5 +107,52 @@ func newPk3WidescreenCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&assets, "assets", "", "directory containing your retail assets*.pk3 (default: platform base dir)")
 	cmd.Flags().StringVar(&out, "out", "", "output pak (default: <assets>/zz-widescreen-menu.pk3)")
+	return cmd
+}
+
+func newPk3SensitivityCmd() *cobra.Command {
+	var assets, out, rangeStr string
+	cmd := &cobra.Command{
+		Use:   "sensitivity",
+		Short: "Rescale the SP mouse-sensitivity slider for modern high-DPI mice",
+		Long: "Rescale the Single-Player CONTROLS \"Mouse Sensitivity\" slider so it covers a\n" +
+			"modern, fine-grained low range (default 0.5, min 0.1, max 2), built from your\n" +
+			"own retail menus into zz-sensitivity-menu.pk3. Retail assets are never modified.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if assets == "" {
+				assets = install.DefaultAssetsBase()
+			}
+			if out == "" {
+				out = filepath.Join(assets, "zz-sensitivity-menu.pk3")
+			}
+			r := paks.DefaultSensitivityRange
+			if rangeStr != "" {
+				parsed, err := paks.ParseSensitivityRange(rangeStr)
+				if err != nil {
+					return err
+				}
+				r = parsed
+			}
+			res, err := paks.BuildSensitivity(assets, out, r)
+			if err != nil {
+				return err
+			}
+			for _, s := range res.Skipped {
+				cmd.Printf(">>> skip %s\n", s)
+			}
+			for _, p := range res.Patched {
+				cmd.Printf(">>> patched %s\n", p)
+			}
+			cmd.Printf("\n>>> built %s (%d menu file(s))\n", res.OutPath, len(res.Patched))
+			cmd.Printf("    CONTROLS > \"Mouse Sensitivity\" slider is now %s default, %s min, %s max.\n",
+				res.Range.Default, res.Range.Min, res.Range.Max)
+			cmd.Printf("    To remove: rm %q\n", res.OutPath)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&assets, "assets", "", "directory containing your retail assets*.pk3 (default: platform base dir)")
+	cmd.Flags().StringVar(&out, "out", "", "output pak (default: <assets>/zz-sensitivity-menu.pk3)")
+	cmd.Flags().StringVar(&rangeStr, "range", "", "slider 'DEFAULT MIN MAX' (default: \"0.5 0.1 2\")")
 	return cmd
 }

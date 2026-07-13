@@ -38,6 +38,13 @@ type Options struct {
 	Textures   OptState
 	Upscale    OptState
 
+	// Combat is the combat feel written to autoexec_sp.cfg: "modern" (default)
+	// or "classic". SkipCutscenes controls the map-intro cutscene auto-skip.
+	// Sensitivity is the base mouse sensitivity written in modern mode.
+	Combat        string
+	Sensitivity   string
+	SkipCutscenes OptState
+
 	// AssumeYes auto-confirms prompts that would otherwise be shown.
 	AssumeYes bool
 
