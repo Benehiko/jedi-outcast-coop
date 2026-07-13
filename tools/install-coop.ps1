@@ -56,6 +56,23 @@
     Build the Real-ESRGAN hi-res texture override. Also a Linux GPU-only mod;
     offered here as a printed command.
 
+.PARAMETER Combat
+    Combat feel: 'modern' (default; free aim, fixed screen-center crosshair,
+    FOV-independent sensitivity, faster bolts) or 'classic' (legacy auto-aim,
+    dynamic muzzle-traced crosshair, FOV-linked sensitivity). Written to
+    base\autoexec_sp.cfg so it overrides a stale openjo_sp.cfg on disk.
+
+.PARAMETER SkipCutscenes
+    Auto-skip scripted map-intro cutscenes (off by default).
+
+.PARAMETER NoSkipCutscenes
+    Never auto-skip cutscenes (suppress the prompt).
+
+.PARAMETER Sensitivity
+    Base mouse sensitivity written in modern mode (default 0.5; the JK2 engine
+    default is 5, which is fast on a modern high-DPI mouse). Ignored with
+    -Combat classic.
+
 .PARAMETER All
     Enable every optional mod above.
 
@@ -89,6 +106,11 @@ param(
     [switch]$WithWidescreen,
     [switch]$WithTextures,
     [switch]$WithUpscale,
+    [ValidateSet('modern','classic')]
+    [string]$Combat = 'modern',
+    [switch]$SkipCutscenes,
+    [switch]$NoSkipCutscenes,
+    [double]$Sensitivity = 0.5,
     [switch]$All,
     [switch]$NoOptional,
     [switch]$Yes,
@@ -270,6 +292,136 @@ function Build-WidescreenPak ([string]$gameData, [string]$outPk3) {
     }
 }
 
+# Build the sensitivity-slider override pak natively. Reads the two SP control
+# menus from the user's own retail assets*.pk3, rewrites only the one sensitivity
+# cvarfloat line (retail "5 2 30" -> "0.5 0.1 2"), and writes zz-sensitivity-menu.pk3
+# so the CONTROLS mouse slider can reach the lower modern values. Returns $true on
+# success. Retail data is untouched.
+function Build-SensitivityPak ([string]$baseDir, [string]$outPk3) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+    $enc  = [System.Text.Encoding]::GetEncoding('iso-8859-1')
+    $stock = "cvarfloat`t`t`t`"sensitivity`" 5 2 30"
+    $new   = "cvarfloat`t`t`t`"sensitivity`" 0.5 0.1 2"
+
+    # Read-only-ish value readout, same group as the slider so it shows/hides with
+    # the MOUSE/JOYSTICK page. ITEM_TYPE_EDITFIELD repaints the cvar every frame, so
+    # it live-updates as the slider drags; clicking it lets you type an exact value.
+    $t = "`t"
+    $readout =
+        "`r`n" +
+        "$t${t}itemDef `r`n" +
+        "$t$t{`r`n" +
+        "$t$t${t}name${t}${t}${t}sensitivityvalue`r`n" +
+        "$t$t${t}group${t}${t}${t}joycontrols`r`n" +
+        "$t$t${t}type${t}${t}${t}ITEM_TYPE_EDITFIELD`r`n" +
+        "$t$t${t}style${t}${t}${t}WINDOW_STYLE_EMPTY`r`n" +
+        "$t$t${t}cvar${t}${t}${t}`"sensitivity`"`r`n" +
+        "$t$t${t}maxChars${t}${t}8`r`n" +
+        "$t$t${t}rect${t}${t}${t}594 211 46 20`r`n" +
+        "$t$t${t}textalign${t}${t}ITEM_ALIGN_LEFT`r`n" +
+        "$t$t${t}textalignx${t}${t}0`r`n" +
+        "$t$t${t}textaligny${t}${t}-2`r`n" +
+        "$t$t${t}font${t}${t}${t}2`r`n" +
+        "$t$t${t}textscale${t}${t}0.8`r`n" +
+        "$t$t${t}forecolor${t}${t}1 1 1 1`r`n" +
+        "$t$t${t}backcolor${t}${t}0 0 0 0`r`n" +
+        "$t$t${t}visible${t}${t}${t}0 `r`n" +
+        "$t$t}`r`n"
+    $sliderClose = "`r`n$t$t}`r`n"
+
+    $work = Join-Path ([System.IO.Path]::GetTempPath()) ("jk2-sens-" + [System.IO.Path]::GetRandomFileName())
+    $uiDir = Join-Path $work 'ui'
+    New-Item -ItemType Directory -Force -Path $uiDir | Out-Null
+    try {
+        $patched = 0
+        foreach ($name in @('controls.menu', 'ingamecontrols.menu')) {
+            # Find the first retail pak carrying this menu (case-insensitive entry).
+            foreach ($p in (Get-ChildItem -LiteralPath $baseDir -Filter 'assets*.pk3' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($p.FullName)
+                try {
+                    $entry = $zip.Entries | Where-Object { $_.FullName -ieq "ui/$name" } | Select-Object -First 1
+                    if (-not $entry) { continue }
+                    $ms = New-Object System.IO.MemoryStream
+                    $es = $entry.Open(); $es.CopyTo($ms); $es.Close()
+                    $content = $enc.GetString($ms.ToArray())
+                    if (-not $content.Contains($stock)) { continue }
+                    $content = $content.Replace($stock, $new)
+                    # Inject the readout right after the slider's itemDef close (the
+                    # first "\r\n\t\t}\r\n" after the rescaled cvarfloat line).
+                    $ai = $content.IndexOf($new)
+                    $ci = $content.IndexOf($sliderClose, $ai)
+                    if ($ci -ge 0) {
+                        $insAt = $ci + $sliderClose.Length
+                        $content = $content.Substring(0, $insAt) + $readout + $content.Substring($insAt)
+                    }
+                    # Emit at the lowercase path the menu loader references.
+                    [System.IO.File]::WriteAllBytes((Join-Path $uiDir $name), $enc.GetBytes($content))
+                    $patched++
+                    break
+                } finally { $zip.Dispose() }
+            }
+        }
+        if ($patched -lt 1) { Info 'sensitivity: no control menu with the stock slider found; skipped.'; return $false }
+        if (Test-Path -LiteralPath $outPk3) { Remove-Item -LiteralPath $outPk3 -Force }
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($work, $outPk3)
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Write autoexec_sp.cfg with the modern-combat cvars (or classic), plus optional
+# cutscene auto-skip. The engine execs autoexec_sp.cfg on startup, after
+# openjo_sp.cfg, so these win over a stale config on disk. Manifest-tracked.
+function Write-CombatConfig ([string]$baseDir) {
+    if ($Combat -eq 'classic') {
+        $aim = 1; $xhair = 1; $sens = 1
+        $desc = 'classic (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity)'
+    } else {
+        $aim = 0; $xhair = 0; $sens = 0
+        $desc = 'modern (free aim, fixed crosshair, FOV-independent sensitivity)'
+    }
+
+    $skip = 0
+    if ($SkipCutscenes) {
+        $skip = 1
+    } elseif (-not $NoSkipCutscenes) {
+        if (Resolve-Mod $false 'Auto-skip scripted map-intro cutscenes?') { $skip = 1 }
+    }
+
+    $cfg = Join-Path $baseDir 'autoexec_sp.cfg'
+    $lines = @(
+        '// Written by install-coop.ps1 - modern combat feel.'
+        '// Delete this file (or re-run with -Combat classic) to change it.'
+        "seta g_saberAutoAim `"$aim`""
+        "seta cg_dynamicCrosshair `"$xhair`""
+        "seta cg_fovSensitivityScale `"$sens`""
+        "seta g_skipIntroCinematics `"$skip`""
+    )
+    if ($Combat -ne 'classic') {
+        # Invariant culture so a comma decimal locale can't write "0,5".
+        $sensStr = $Sensitivity.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+        $lines += "seta sensitivity `"$sensStr`""
+    }
+    Set-Content -LiteralPath $cfg -Value $lines -Encoding ASCII
+    Manifest-Add $cfg
+    Info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    # In modern mode, rescale the CONTROLS mouse-sensitivity slider (retail min 2)
+    # so the UI can reach the lower modern values.
+    if ($Combat -ne 'classic') {
+        $smPak = Join-Path $baseDir 'zz-sensitivity-menu.pk3'
+        try {
+            if (Build-SensitivityPak $baseDir $smPak) {
+                Manifest-Add $smPak
+                Info 'installed zz-sensitivity-menu.pk3 (CONTROLS mouse slider: 0.1-2)'
+            }
+        } catch {
+            Info "sensitivity-menu build failed ($($_.Exception.Message))."
+        }
+    }
+}
+
 # Run the optional-mod stage after the core install.
 function Invoke-OptionalMods ([string]$gameData, [string]$baseDir) {
     $any = $false
@@ -308,6 +460,10 @@ function Invoke-OptionalMods ([string]$gameData, [string]$baseDir) {
         Info "    tools/upscale-textures.sh --assets `"$gameData\base`" --out zzz-hires-textures.pk3"
         Info '(see docs/hires-textures.md)'
     }
+
+    # Modern combat feel + optional cutscene skip (always writes autoexec_sp.cfg).
+    Write-CombatConfig $baseDir
+    $any = $true
 
     if (-not $any) { Info 'no optional mods selected.' }
 }

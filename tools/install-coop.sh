@@ -29,6 +29,14 @@
 #   --with-widescreen Enable the widescreen/QHD/ultrawide video-menu mod.
 #   --with-textures   Generate the AI material-texture pak (GPU + container).
 #   --with-upscale    Build the Real-ESRGAN hi-res texture pak (GPU + container).
+#   --combat MODE     Combat feel: 'modern' (default; free aim, fixed crosshair,
+#                     FOV-independent sensitivity, faster bolts) or 'classic'
+#                     (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity).
+#                     Written to base/autoexec_sp.cfg so it overrides stale configs.
+#   --skip-cutscenes  Auto-skip scripted map-intro cutscenes (off by default).
+#   --no-skip-cutscenes  Never auto-skip cutscenes (suppress the prompt).
+#   --sensitivity N   Base mouse sensitivity for modern mode (default 0.5; the
+#                     JK2 engine default is 5). Ignored with --combat classic.
 #   --all             Enable every optional mod above.
 #   --no-optional     Skip all optional-mod prompts (core install only).
 #   --yes, -y         Assume "yes" to prompts (non-interactive; pairs with --all).
@@ -96,6 +104,18 @@ OPT_WIDESCREEN=ask
 OPT_TEXTURES=ask
 OPT_UPSCALE=ask
 ASSUME_YES=0
+
+# Combat feel. The gamecode already ships modern defaults (free aim, fixed
+# crosshair, faster bolts); this writes them explicitly into autoexec_sp.cfg so
+# a stale, pre-existing openjo_sp.cfg can't override them, and lets the user pick
+# the classic feel instead. COMBAT_MODE: modern | classic. Cutscene auto-skip is
+# a separate opt-in (off by default, matching the gamecode default).
+COMBAT_MODE=modern
+OPT_SKIPCUTSCENES=ask
+# Base mouse sensitivity written for modern combat. JK2's engine default is 5,
+# which is fast on a modern high-DPI mouse; 0.5 is a calmer starting point.
+# Only written in modern mode (classic leaves the engine/user value alone).
+MOUSE_SENSITIVITY=0.5
 
 # True if we can prompt the user (stdin is a real terminal).
 is_interactive() { [[ -t 0 ]]; }
@@ -214,6 +234,60 @@ do_uninstall() {
 # Runs after the core install. For each mod, resolves the opt-in decision, and
 # if yes either builds+links the pak or (for GPU mods without a runtime) prints
 # the exact command to run later. All installed paks are manifest-tracked.
+# Write autoexec_sp.cfg with the modern-combat cvars (or the classic feel), plus
+# the optional cutscene auto-skip. The engine execs autoexec_sp.cfg on startup,
+# after openjo_sp.cfg, so these values take effect even if an older config on
+# disk persisted the legacy ones. Manifest-tracked so --uninstall removes it.
+write_combat_config() {
+    local cfg="$BASE_DIR/autoexec_sp.cfg"
+    local skip aim xhair sens desc
+
+    if [[ "$COMBAT_MODE" == classic ]]; then
+        aim=1; xhair=1; sens=1
+        desc="classic (legacy auto-aim, dynamic crosshair, FOV-linked sensitivity)"
+    else
+        aim=0; xhair=0; sens=0
+        desc="modern (free aim, fixed crosshair, FOV-independent sensitivity)"
+    fi
+
+    if [[ "$(resolve_opt "$OPT_SKIPCUTSCENES" \
+        "Auto-skip scripted map-intro cutscenes?")" == yes ]]; then
+        skip=1
+    else
+        skip=0
+    fi
+
+    {
+        echo "// Written by install-coop.sh — modern combat feel."
+        echo "// Delete this file (or run the installer with --combat classic) to change it."
+        echo "seta g_saberAutoAim \"$aim\""
+        echo "seta cg_dynamicCrosshair \"$xhair\""
+        echo "seta cg_fovSensitivityScale \"$sens\""
+        echo "seta g_skipIntroCinematics \"$skip\""
+        [[ "$COMBAT_MODE" == modern ]] && echo "seta sensitivity \"$MOUSE_SENSITIVITY\""
+    } > "$cfg"
+    manifest_add "$cfg"
+    info "wrote autoexec_sp.cfg: combat=$desc, cutscene-skip=$skip"
+
+    # In modern mode, rescale the CONTROLS mouse-sensitivity slider (retail min 2)
+    # so the UI can reach and fine-tune the lower modern values. Builds a zz-
+    # override pak from the user's own retail menus; retail data is untouched.
+    if [[ "$COMBAT_MODE" == modern ]]; then
+        local sm_tool="$ROOT/tools/build-sensitivity-menu-pk3.sh"
+        local sm_pak="$BASE_DIR/zz-sensitivity-menu.pk3"
+        if [[ -x "$sm_tool" ]]; then
+            if "$sm_tool" --assets "$BASE_DIR" --out "$sm_pak" >/dev/null 2>&1; then
+                manifest_add "$sm_pak"
+                info "installed zz-sensitivity-menu.pk3 (CONTROLS > MOUSE/JOYSTICK slider: 0.1–2)"
+            else
+                info "sensitivity-menu builder failed; run it manually: $sm_tool"
+            fi
+        else
+            info "sensitivity-menu builder not found: $sm_tool"
+        fi
+    fi
+}
+
 do_optional_mods() {
     local gamedata="$1"
     local any=0
@@ -286,6 +360,13 @@ do_optional_mods() {
             info "    $up_tool --assets '$gamedata/base' --out '$up_pak'"
         fi
     fi
+
+    # --- Modern combat feel + optional cutscene skip -----------------------
+    # Always writes autoexec_sp.cfg (the engine execs it at startup) so the
+    # combat cvars win over any stale openjo_sp.cfg. `--combat classic` restores
+    # the legacy feel; cutscene auto-skip is a separate opt-in.
+    write_combat_config
+    any=1
 
     (( any == 0 )) && info "no optional mods selected."
     return 0
@@ -416,16 +497,30 @@ while [[ $# -gt 0 ]]; do
         --with-widescreen) OPT_WIDESCREEN=yes; shift ;;
         --with-textures)   OPT_TEXTURES=yes; shift ;;
         --with-upscale)    OPT_UPSCALE=yes; shift ;;
+        --combat) COMBAT_MODE="${2:?--combat needs modern|classic}"; shift 2 ;;
+        --combat=*) COMBAT_MODE="${1#*=}"; shift ;;
+        --skip-cutscenes)    OPT_SKIPCUTSCENES=yes; shift ;;
+        --no-skip-cutscenes) OPT_SKIPCUTSCENES=no; shift ;;
+        --sensitivity) MOUSE_SENSITIVITY="${2:?--sensitivity needs a number}"; shift 2 ;;
+        --sensitivity=*) MOUSE_SENSITIVITY="${1#*=}"; shift ;;
         --all)             OPT_WIDESCREEN=yes; OPT_TEXTURES=yes; OPT_UPSCALE=yes; shift ;;
-        --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; shift ;;
+        --no-optional)     OPT_WIDESCREEN=no; OPT_TEXTURES=no; OPT_UPSCALE=no; OPT_SKIPCUTSCENES=no; shift ;;
         --yes|-y)          ASSUME_YES=1; shift ;;
         --uninstall) ACTION=uninstall; shift ;;
         -h|--help)
-            sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
 done
+
+case "$COMBAT_MODE" in
+    modern|classic) ;;
+    *) die "--combat must be 'modern' or 'classic' (got: $COMBAT_MODE)" ;;
+esac
+
+[[ "$MOUSE_SENSITIVITY" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+    die "--sensitivity must be a non-negative number (got: $MOUSE_SENSITIVITY)"
 
 case "$ACTION" in
     install)   do_install "$GAMEDATA" ;;
