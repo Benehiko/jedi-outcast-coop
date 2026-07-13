@@ -4,11 +4,12 @@
 //
 // The patch set splits into two tiers:
 //
-//   - The co-op BASE (0001-0021): networking, dual-cgame, four-player, menus.
-//     Always applied; not user-selectable.
-//   - Three GRAPHICS features (0022-0024), each one patch, each independently
-//     toggleable in any combination:
-//     modern-combat    (0022) — aim, blaster speed, fixed crosshair
+//   - The co-op BASE: networking, dual-cgame, four-player, menus (0001-0021),
+//     plus the cvar-backed combat patches whose settings live in autoexec_sp.cfg
+//     (modern-combat 0022, blaster-velocity 0025). Always applied; not
+//     user-selectable at build time.
+//   - Two GRAPHICS features, each one patch, each independently toggleable in
+//     any combination (they add latched renderer cvars, so they must be built in):
 //     widescreen       (0023) — 2D aspect correction, vidmodes, HUD anchor
 //     render-fidelity  (0024) — software overbright + entity lighting
 //
@@ -42,13 +43,12 @@ type Feature struct {
 
 // Features is the ordered list of selectable graphics features. Order matches
 // the patch numbering, which is also the apply order.
+//
+// modern-combat (0022) and blaster-velocity (0025) are NOT here: their cvars are
+// CVAR_ARCHIVE, so the config drives them purely through autoexec_sp.cfg with no
+// rebuild. Those two patches are part of the always-applied co-op base. Only the
+// genuinely build-time (latched renderer cvar) features remain selectable.
 var Features = []Feature{
-	{
-		Key:   "modern-combat",
-		Title: "Modern combat",
-		Desc:  "Snappier aim, faster blaster bolts, fixed screen-center crosshair.",
-		Patch: "0022-modern-combat.patch",
-	},
 	{
 		Key:   "widescreen",
 		Title: "Widescreen",

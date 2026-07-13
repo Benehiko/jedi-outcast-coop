@@ -1,0 +1,45 @@
+diff --git a/codeJK2/game/g_local.h b/codeJK2/game/g_local.h
+index 221cf26d..d6ba78ad 100644
+--- a/codeJK2/game/g_local.h
++++ b/codeJK2/game/g_local.h
+@@ -302,6 +302,7 @@ extern	cvar_t	*g_inactivity;
+ extern	cvar_t	*g_debugMove;
+ extern	cvar_t	*g_subtitles;
+ extern	cvar_t	*g_removeDoors;
++extern	cvar_t	*g_blasterVelocity;
+ 
+ extern	cvar_t	*g_ICARUSDebug;
+ 
+diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
+index 3ffe3caf..43e16211 100644
+--- a/codeJK2/game/g_main.cpp
++++ b/codeJK2/game/g_main.cpp
+@@ -170,6 +170,7 @@ cvar_t	*g_saberRealisticCombat;
+ cvar_t	*g_saberMoveSpeed;
+ cvar_t	*g_saberAnimSpeed;
+ cvar_t	*g_saberAutoAim;
++cvar_t	*g_blasterVelocity;
+ 
+ qboolean	stop_icarus = qfalse;
+ 
+@@ -590,6 +591,7 @@ void G_InitCvars( void ) {
+ 	g_saberMoveSpeed = gi.cvar( "g_saberMoveSpeed", "1", CVAR_ARCHIVE|CVAR_CHEAT );//how fast you run while attacking with a saber
+ 	g_saberAnimSpeed = gi.cvar( "g_saberAnimSpeed", "1", CVAR_ARCHIVE|CVAR_CHEAT );//how fast saber animations run
+ 	g_saberAutoAim = gi.cvar( "g_saberAutoAim", "0", CVAR_ARCHIVE );//auto-aims (snaps facing/swings) at enemies when not moving or just running forward; off by default for modern free aim, set to 1 for legacy behavior
++	g_blasterVelocity = gi.cvar( "g_blasterVelocity", "2300", CVAR_ARCHIVE );//primary blaster bolt speed (retail 2300)
+ 
+ 	g_AIsurrender = gi.cvar( "g_AIsurrender", "0", CVAR_CHEAT );
+ 	g_numEntities = gi.cvar( "g_numEntities", "0", CVAR_CHEAT );
+diff --git a/codeJK2/game/wp_blaster_rifle.cpp b/codeJK2/game/wp_blaster_rifle.cpp
+index bdd8093e..90aa75e3 100644
+--- a/codeJK2/game/wp_blaster_rifle.cpp
++++ b/codeJK2/game/wp_blaster_rifle.cpp
+@@ -36,7 +36,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
+ static void WP_FireBlasterMissile( gentity_t *ent, vec3_t start, vec3_t dir, qboolean altFire )
+ //---------------------------------------------------------
+ {
+-	int velocity	= BLASTER_VELOCITY;
++	int velocity	= g_blasterVelocity ? g_blasterVelocity->integer : BLASTER_VELOCITY;
+ 	int	damage		= !altFire ? weaponData[WP_BLASTER].damage : weaponData[WP_BLASTER].altDamage;
+ 
+ 	// If an enemy is shooting at us, lower the velocity so you have a chance to evade
