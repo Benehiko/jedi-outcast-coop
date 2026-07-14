@@ -25,10 +25,35 @@ The installer only ever **symlinks** your existing retail files into the
 place the engine looks for them. It copies nothing from your game install and
 modifies nothing there.
 
+## Fastest path: `jk2coop setup`
+
+If you just want to play, run the one guided command and skip the manual build
+steps below:
+
+```sh
+git clone --recurse-submodules <repo>
+cd jedi-outcast-coop
+make build            # produces ./jk2coop
+./jk2coop setup       # submodule + patches + build + install, guided
+```
+
+`setup` initialises the OpenJK submodule, applies the co-op patches, builds the
+engine, and installs. If the build tools (`cmake`, `ninja`, a C compiler) are
+missing it prints the exact install command for your distro (apt / pacman / dnf)
+and stops so you can install them and re-run. If you have
+[`vee`](https://github.com/Benehiko/vee), `setup` can instead build the engine
+inside a clean throwaway VM, so you never install a compiler on the host — it
+prompts, or force the choice with `--vm` / `--host`. After a VM build it offers
+to delete the VM (kept by default for fast rebuilds).
+
+The manual steps 1–2 below are what `setup` automates; use them if you want to
+drive each stage yourself.
+
 ## 1. Build the binaries
 
 Requires: `cmake`, `ninja`, `gcc`, `SDL2`, `OpenAL`, `zlib`, `libpng`,
-`libjpeg`.
+`libjpeg`. (`jk2coop setup` checks for these and prints the install command for
+your distro if any are missing — you do not need to install them by hand first.)
 
 ```sh
 # from the repository root

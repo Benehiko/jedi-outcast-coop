@@ -35,6 +35,11 @@ Nothing from your retail game install is copied or redistributed here.
 
 ## 1. Get the binaries
 
+The simplest path is `jk2coop setup` (after `make build`), which initialises the
+submodule, applies the co-op patches, builds the engine, and installs in one
+guided step — it prints what to install if the MSVC/CMake toolchain is missing.
+If you would rather not build at all, download a prebuilt engine instead:
+
 Either download the `jk2coop-windows` artifact from a green
 [CI run](../.github/workflows/build.yml), or build locally:
 

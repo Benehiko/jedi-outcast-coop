@@ -65,15 +65,29 @@ files — your game install is never copied from or modified.
 | Windows | [docs/install-windows.md](docs/install-windows.md) | PowerShell installer; co-op verified live |
 | macOS | [docs/install-macos.md](docs/install-macos.md) | one-command installer (not yet run on real hardware) |
 
-The short version, once built ([docs/building.md](docs/building.md)):
+The fastest path from a fresh clone to playing is one command:
 
-    jk2coop install                    # build the engine, symlink your Steam assets, apply your config
+    git clone --recurse-submodules https://github.com/Benehiko/jedi-outcast-coop
+    cd jedi-outcast-coop
+    make build                         # produces ./jk2coop (or download a pre-built binary, below)
+    ./jk2coop setup                    # fetch submodule, build the engine, and install — guided
+
+`setup` initialises the OpenJK submodule, applies the co-op patches,
+builds the engine, and installs — all in one step. If the build toolchain
+(cmake, ninja, a C compiler) is missing, it prints the exact command to
+install it for your OS, or — if you have [`vee`](https://github.com/Benehiko/vee)
+— offers to build inside a clean throwaway VM so you never install a
+compiler at all.
+
+The individual commands, once built ([docs/building.md](docs/building.md)):
+
+    jk2coop install                    # symlink your Steam assets, apply your config (engine already built)
     jk2coop launch                     # play; hosts a co-op game on UDP 29070 by default
     jk2coop launch --solo              # play single-player (default map kejim_post)
     jk2coop join <host-ip>             # join a co-op game from another machine
     jk2coop uninstall                  # remove everything it installed
 
-There are exactly seven user-facing commands: `install`, `launch`,
+There are eight user-facing commands: `setup`, `install`, `launch`,
 `host`, `join`, `game`, `graphics` (alias `gfx`), and `uninstall`. The
 same cross-platform `jk2coop` Go binary is the recommended path on Linux,
 macOS, and Windows, with pre-built binaries on every release. See
