@@ -18,11 +18,19 @@ make build            # produces ./jk2coop
 ./jk2coop setup       # same guided setup, from the embedded source
 ```
 
-`jk2coop setup` does everything the manual sections below describe, in order,
-and stops with a clear, copy-paste install command if a build tool is missing.
-If you have [`vee`](https://github.com/Benehiko/vee) it can also build the
-engine inside a disposable VM, so you never install a C/C++ toolchain on the
-host — `setup` prompts for this (or force it with `--vm` / `--host`).
+`jk2coop setup` does everything the manual sections below describe, in order.
+
+**By default it builds in a container inside a throwaway VM** (via
+[`vee`](https://github.com/Benehiko/vee)), so you install **neither a C/C++
+toolchain nor Docker** on the host — the only prerequisite is `vee` itself. See
+[§ Building in a container (`--docker`)](#building-in-a-container---docker)
+below. Override the default with:
+
+- `--host` — build on this machine (needs the cmake/ninja/compiler toolchain;
+  `setup` prints the exact install command if it is missing);
+- `--vm` — build in a plain VM (no container) via vee.
+
+When `vee` is not installed, `setup` falls back to a host build.
 
 By default `setup` builds from the **source embedded in the binary**, extracted
 to `~/.cache/jk2coop` — see [embedded-source.md](embedded-source.md). The manual
@@ -96,6 +104,50 @@ Produces three artifacts:
 macOS and Windows build with the same `-DBuildJK2SP*` options; see the
 [macOS](install-macos.md) and [Windows](install-windows.md) install guides
 for toolchain specifics and artifact names.
+
+## Building in a container (`--docker`)
+
+`jk2coop setup --docker` builds the engine inside a container without installing
+**anything** on the host — not a C/C++ toolchain, and not even Docker. It works
+by using [`vee`](https://github.com/Benehiko/vee) to run a small Linux VM from
+its `docker` template (Alpine + the Docker daemon), then driving that daemon
+over the Docker Engine API — vee forwards it to `tcp://127.0.0.1:2375` on the
+host, and `jk2coop` talks to it with a tiny built-in HTTP client. The only host
+prerequisite is `vee` itself (which brings QEMU/KVM).
+
+```sh
+jk2coop setup --docker      # build in a container in a vee VM; host stays clean
+```
+
+What happens under the hood:
+
+1. `vee create jk2coop-docker --template docker --virtiofs-dir <source> …` boots
+   the VM and shares your (already patched) engine source into it over
+   **virtiofs**.
+2. Inside the VM, the share is mounted and the Docker daemon is started.
+3. `jk2coop` builds a small image (CMake, Ninja, the SDL2/OpenAL/zlib/png/jpeg
+   dev libraries, and the mingw-w64 cross toolchain) via the Engine API.
+4. A container compiles the engine with the bind-mounted source. Because the
+   source is a virtiofs share, the build outputs appear back on the **host**
+   automatically — there is no copy-out step.
+
+The VM is kept after a successful build (a re-run reuses the warm VM and its
+cached image); `setup` offers to delete it, or run `vee delete jk2coop-docker`.
+
+### Target matrix
+
+The build always runs in a Linux container, and produces the binary your host
+needs:
+
+| Host OS | Output | How |
+|---------|--------|-----|
+| Linux   | Linux ELF (`.so`, `openjo_sp.<arch>`) | native compile in the container |
+| Windows | Windows PE (`.exe`, `.dll`) | mingw-w64 cross-compile (the `.exe` runs on your Windows host) |
+| macOS   | *not supported* | a Linux container cannot emit a macOS Mach-O binary, and Apple's SDK is not redistributable — build on the Mac with `--host` (Xcode), or use the `jk2coop-macos` CI artifact |
+
+> **Note:** the Docker API inside the VM is plaintext and loopback-only (vee
+> forwards it to `127.0.0.1` via user-mode NAT). That is fine for a throwaway
+> local build VM; do not expose it beyond localhost.
 
 ## Running without the installer
 
