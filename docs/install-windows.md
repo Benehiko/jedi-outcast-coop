@@ -35,13 +35,19 @@ Nothing from your retail game install is copied or redistributed here.
 
 ## 1. Get the binaries
 
-The simplest path is `jk2coop setup` (after `make build`), which initialises the
-submodule, applies the co-op patches, builds the engine, and installs in one
-guided step — it prints what to install if the MSVC/CMake toolchain is missing.
-If you would rather not build at all, download a prebuilt engine instead:
+The simplest path is `jk2coop setup`, which extracts the engine source
+**embedded in the binary**, applies the co-op patches (in pure Go — no `git`
+needed), builds the engine, and installs in one guided step — it prints what to
+install if the MSVC/CMake toolchain is missing. A pre-built `jk2coop.exe` needs
+neither a clone nor the OpenJK submodule; if you build `jk2coop` yourself, run
+`make build` first.
 
-Either download the `jk2coop-windows` artifact from a green
-[CI run](../.github/workflows/build.yml), or build locally:
+If you would rather not build the engine at all, download a prebuilt one and
+skip to install: fetch the `jk2coop-windows` artifact from a green
+[CI run](../.github/workflows/build.yml).
+
+To build the engine from the OpenJK **submodule** by hand instead (patch
+development), see [embedded-source.md](embedded-source.md) and:
 
 - install Visual Studio (MSVC) and CMake, plus the OpenJK Windows build
   dependencies;

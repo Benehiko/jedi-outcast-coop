@@ -28,13 +28,18 @@ modifies nothing there.
 
 ## Fastest path: `jk2coop setup`
 
-`./jk2coop setup` (after `make build`) initialises the submodule, applies the
-co-op patches, builds the engine, and installs in one guided step. If the build
+`./jk2coop setup` extracts the engine source **embedded in the binary**, applies
+the co-op patches (in pure Go — no `git` needed), builds the engine, and installs
+in one guided step. A pre-built `jk2coop` needs neither a clone nor the OpenJK
+submodule; if you build `jk2coop` yourself, run `make build` first. If the build
 tools are missing it prints the `xcode-select --install` + `brew install …`
 commands to run, then re-run `setup`. (The VM build option is Linux-only; on
 macOS `setup` builds on the host.)
 
-The manual steps 1–2 below are what `setup` automates.
+The manual steps 1–2 below build from the OpenJK **submodule** instead — the
+reference for patch development. A normal install does not need them; to make
+`setup` use the submodule, pass `--repo .` from inside a checkout. See
+[embedded-source.md](embedded-source.md).
 
 ## 1. Build the binaries
 
