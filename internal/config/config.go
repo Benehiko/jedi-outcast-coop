@@ -58,6 +58,11 @@ type Graphics struct {
 	// MSAA is the multisample sample count written as r_ext_multisample
 	// (0 = off, else 2/4/8/16). Applied at next launch; no rebuild.
 	MSAA int `toml:"msaa"`
+	// Fullscreen runs the engine fullscreen (r_fullscreen 1). Default false =
+	// windowed, which is the reliable choice on Wayland where fullscreen
+	// mode-list enumeration is flaky. The launch `--windowed` flag still forces
+	// windowed regardless. Applied at next launch; no rebuild.
+	Fullscreen bool `toml:"fullscreen"`
 	// ResWidth/ResHeight are the game resolution written as r_customwidth /
 	// r_customheight with r_mode -1. Both 0 means "auto": leave the engine on its
 	// own r_mode default and force no custom size. Applied at next launch; no
@@ -91,7 +96,8 @@ func Defaults() Config {
 			Widescreen:      true,
 			Lighting:        true,
 			MSAA:            0,
-			ResWidth:        0, // 0x0 = auto (engine picks; no forced custom mode)
+			Fullscreen:      false, // windowed by default; reliable on Wayland
+			ResWidth:        0,     // 0x0 = auto (engine picks; no forced custom mode)
 			ResHeight:       0,
 			TextureUpscale:  false,
 			TextureGenerate: false,

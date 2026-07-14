@@ -15,6 +15,12 @@ type Resolution struct {
 	W, H int
 }
 
+// AutoResFallback is the safe window size written for "auto" resolution when no
+// explicit size is set. 1280x720 is small enough that every driver can create a
+// window at it, avoiding the stale-indexed-mode / EGL-config failures that abort
+// the renderer at larger or exotic modes.
+var AutoResFallback = Resolution{W: 1280, H: 720}
+
 // CommonResolutions is the fixed list of selectable resolutions offered by the
 // graphics TUI, smallest to largest. The auto/native option (0x0) is offered
 // separately and not part of this list.
