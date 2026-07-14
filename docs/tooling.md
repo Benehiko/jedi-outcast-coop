@@ -138,7 +138,7 @@ skip_cutscenes = false
 [graphics]
 widescreen = true        # patch-backed (needs rebuild to change)
 lighting = true          # render-fidelity patch (needs rebuild)
-msaa = 0                 # r_ext_multisample: 0/2/4/8 (runtime cvar)
+msaa = 0                 # r_ext_multisample: 0/2/4/8/16 (runtime cvar)
 texture_upscale = false  # GPU pak
 texture_generate = false # GPU pak
 ```
@@ -219,7 +219,7 @@ texture upscale, and texture generate — and applies the change:
   mode. The TUI auto-suggests your monitor's current resolution (detected via
   `xrandr` on X11 or `wlr-randr` on Wayland) and flags the matching entry as
   `native`.
-- **`msaa`** (`r_ext_multisample`: 0/2/4/8) is a runtime cvar — no rebuild.
+- **`msaa`** (`r_ext_multisample`: 0/2/4/8/16) is a runtime cvar — no rebuild.
 - **`texture_upscale`** and **`texture_generate`** place optional GPU-built
   override paks — no engine rebuild.
 
