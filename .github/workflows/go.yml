@@ -19,15 +19,15 @@ jobs:
     name: lint + build + test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.5'
           cache: true
 
       - name: Lint (golangci-lint run)
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --timeout=5m
@@ -59,11 +59,11 @@ jobs:
     steps:
       # The e2e tests drive the built binary against the OpenJK submodule, so it
       # must be checked out. They reset the submodule around each run.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.5'
           cache: true
