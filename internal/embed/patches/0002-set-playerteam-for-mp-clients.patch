@@ -1,0 +1,27 @@
+diff --git a/codemp/game/g_client.c b/codemp/game/g_client.c
+index a46845dd..50cbecab 100644
+--- a/codemp/game/g_client.c
++++ b/codemp/game/g_client.c
+@@ -3332,6 +3332,22 @@ void ClientSpawn(gentity_t *ent) {
+ 	client->ps.persistant[PERS_SPAWN_COUNT]++;
+ 	client->ps.persistant[PERS_TEAM] = client->sess.sessionTeam;
+ 
++	// Singleplayer assigns every human player to NPCTEAM_PLAYER when it spawns
++	// them (codeJK2/game/g_client.cpp:1625). Multiplayer never does, leaving
++	// playerTeam zero-initialized to NPCTEAM_FREE. The singleplayer AI compares
++	// this field directly against its enemyTeam -- see NPC_AI_Stormtrooper.c:782
++	// and NPC_reactions.c:628 -- so campaign NPCs never recognise a player as
++	// an enemy and simply ignore them.
++	//
++	// Only do this outside the team gametypes. At and above GT_TEAM the session
++	// team is meaningful and NPC_ValidEnemy already maps TEAM_RED/TEAM_BLUE onto
++	// the NPC teams itself.
++	if ( level.gametype < GT_TEAM )
++	{
++		client->playerTeam = NPCTEAM_PLAYER;
++		client->enemyTeam  = NPCTEAM_ENEMY;
++	}
++
+ 	client->airOutTime = level.time + 12000;
+ 
+ 	// set max health

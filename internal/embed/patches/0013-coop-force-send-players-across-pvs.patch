@@ -1,0 +1,18 @@
+diff --git a/code/server/sv_snapshot.cpp b/code/server/sv_snapshot.cpp
+index 1d92767..88f2691 100644
+--- a/code/server/sv_snapshot.cpp
++++ b/code/server/sv_snapshot.cpp
+@@ -425,7 +425,12 @@ static void SV_AddEntitiesVisibleFromPoint( vec3_t origin, clientSnapshot_t *fra
+ 		}
+ 
+ 		// broadcast entities are always sent, and so is the main player so we don't see noclip weirdness
+-		if ( ent->svFlags & SVF_BROADCAST || !e) {
++		// co-op: force-send every connected player (entity < MAX_CLIENTS), not
++		// just the viewer's own (!e), so co-op partners stay visible to each
++		// other across PVS boundaries (adjacent rooms) instead of popping out.
++		// Unused client slots are already filtered by the !ent->inuse check
++		// above. Mirrors MP's per-viewer client send (SVF_BROADCASTCLIENTS).
++		if ( ent->svFlags & SVF_BROADCAST || e < MAX_CLIENTS ) {
+ 			SV_AddEntToSnapshot( svEnt, ent, eNums );
+ 			continue;
+ 		}

@@ -1,0 +1,168 @@
+diff --git a/codeJK2/cgame/cg_draw.cpp b/codeJK2/cgame/cg_draw.cpp
+index d0a0df66..d47b222d 100644
+--- a/codeJK2/cgame/cg_draw.cpp
++++ b/codeJK2/cgame/cg_draw.cpp
+@@ -286,16 +286,22 @@ static void CG_DrawForcePower(centity_t *cent,int x,int y)
+ 	vec4_t		calcColor;
+ 	float		value,extra=0,inc,percent;
+ 
+-	if ( !cent->gent->client->ps.forcePowersKnown )
++	// dual-load: on a serverless remote client cent->gent->client is null for
++	// the local player; the same force-power fields live in the received
++	// snapshot playerstate. Use the gent's ps when present (host), else the
++	// snapshot's (remote client).
++	const playerState_t	*ps = ( cent->gent && cent->gent->client ) ? &cent->gent->client->ps : &cg.snap->ps;
++
++	if ( !ps->forcePowersKnown )
+ 	{
+ 		return;
+ 	}
+-	inc = (float)  cent->gent->client->ps.forcePowerMax / MAX_TICS;
+-	value = cent->gent->client->ps.forcePower;
+-	if ( value > cent->gent->client->ps.forcePowerMax )
++	inc = (float)  ps->forcePowerMax / MAX_TICS;
++	value = ps->forcePower;
++	if ( value > ps->forcePowerMax )
+ 	{//supercharged with force
+-		extra = value - cent->gent->client->ps.forcePowerMax;
+-		value = cent->gent->client->ps.forcePowerMax;
++		extra = value - ps->forcePowerMax;
++		value = ps->forcePowerMax;
+ 	}
+ 
+ 	for (i=MAX_TICS-1;i>=0;i--)
+@@ -303,7 +309,7 @@ static void CG_DrawForcePower(centity_t *cent,int x,int y)
+ 		if ( extra )
+ 		{//supercharged
+ 			memcpy(calcColor, colorTable[CT_WHITE], sizeof(vec4_t));
+-			percent = 0.75f + (sin( cg.time * 0.005f )*((extra/cent->gent->client->ps.forcePowerMax)*0.25f));
++			percent = 0.75f + (sin( cg.time * 0.005f )*((extra/ps->forcePowerMax)*0.25f));
+ 			calcColor[0] *= percent;
+ 			calcColor[1] *= percent;
+ 			calcColor[2] *= percent;
+@@ -787,7 +793,7 @@ static void CG_DrawHUD( centity_t *cent )
+ //				value = cg.snap->ps.ammo[weaponData[cent->currentState.weapon].ammoIndex];
+ 			}
+ //			CG_DrawSmallStringColor(x, y - 60,va("Ammo:%d",value), colorTable[CT_HUD_GREEN] );
+-			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",cent->gent->client->ps.forcePower), colorTable[CT_HUD_GREEN] );
++			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",( cent->gent && cent->gent->client ) ? cent->gent->client->ps.forcePower : cg.snap->ps.forcePower), colorTable[CT_HUD_GREEN] );
+ 		}
+ 
+ 		CG_DrawHUDRightFrame1(x,y);
+@@ -1148,7 +1154,10 @@ static void CG_DrawZoomMask( void )
+ 
+ 			CG_DrawPic( 570, 140, 12, 160, cgs.media.laGogglesSideBit );
+ 
+-			float light = (128-cent->gent->lightLevel) * 0.5f;
++			// dual-load: lightLevel is a server-computed gentity field with no
++			// snapshot equivalent; on a remote client without a gent, treat it
++			// as 0 (full brightness through the goggles).
++			float light = (128-( cent->gent ? cent->gent->lightLevel : 0 )) * 0.5f;
+ 
+ 			if ( light < -81 ) // saber can really jack up local light levels....?magic number??
+ 			{
+diff --git a/codeJK2/cgame/cg_main.cpp b/codeJK2/cgame/cg_main.cpp
+index 9be003e9..01b31e0c 100644
+--- a/codeJK2/cgame/cg_main.cpp
++++ b/codeJK2/cgame/cg_main.cpp
+@@ -633,10 +633,17 @@ static void CG_AS_Register(void)
+ 
+ 	cgi_AS_AddPrecacheEntry( "#clear" );	// ;-)
+ 	//FIXME: Don't ask... I had to get around a really nasty MS error in the templates with this...
+-	namePrecache_m::iterator	pi;
+-	STL_ITERATE( pi, (*as_preCacheMap) )
++	// dual-load: as_preCacheMap is filled by the server game while spawning
++	// entities (g_spawn.cpp). A serverless remote client spawns nothing
++	// locally, so the map is null; skip the precache-name loop but still let
++	// cgi_AS_ParseSets() run — ambient sets then register lazily on use.
++	if ( as_preCacheMap )
+ 	{
+-		cgi_AS_AddPrecacheEntry( ((*pi).first).c_str() );
++		namePrecache_m::iterator	pi;
++		STL_ITERATE( pi, (*as_preCacheMap) )
++		{
++			cgi_AS_AddPrecacheEntry( ((*pi).first).c_str() );
++		}
+ 	}
+ 
+ 	cgi_AS_ParseSets();
+@@ -1469,7 +1476,12 @@ Ghoul2 Insert End
+ 
+ 	extern	cvar_t	*com_buildScript;
+ 
+-	if (com_buildScript->integer) {
++	// dual-load: com_buildScript is the game library's own cvar global, set in
++	// InitGame via gi.cvar. A serverless remote client never runs InitGame, so
++	// the pointer is null here. Guard it the same way the engine does at
++	// common.cpp:296 — it is a build-time asset-precache flag, always 0 at
++	// runtime, so skipping the block on the client changes nothing.
++	if (com_buildScript && com_buildScript->integer) {
+ 		cgi_R_RegisterShader( "gfx/misc/nav_cpoint" );
+ 		cgi_R_RegisterShader( "gfx/misc/nav_line" );
+ 		cgi_R_RegisterShader( "gfx/misc/nav_arrow" );
+diff --git a/codeJK2/cgame/cg_view.cpp b/codeJK2/cgame/cg_view.cpp
+index 79721d7f..aa00b16e 100644
+--- a/codeJK2/cgame/cg_view.cpp
++++ b/codeJK2/cgame/cg_view.cpp
+@@ -1862,12 +1862,22 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
+ 
+ 	// let the client system know what our weapon and zoom settings are
+ 	//FIXME: should really send forcePowersActive over network onto cg.snap->ps...
+-	float speed = cg.refdef.fov_y / 75.0 * ((cg_entities[0].gent->client->ps.forcePowersActive&(1<<FP_SPEED))?1.0f:Q_min(cg_timescale.value, 1.0f));
++	// dual-load: on a serverless remote client g_entities[0].client is null
++	// (no local server spawned the player), so cg_entities[0].gent->client
++	// faults. The values we need for the local player are all in the received
++	// snapshot playerstate; fall back to cg.snap->ps when the gent path is not
++	// available. The host keeps its real gentity path.
++	const gentity_t	*localGent = cg_entities[0].gent;
++	const qboolean	haveLocalClient = (qboolean)( localGent && localGent->client );
++	const int		localForcePowers = haveLocalClient ? localGent->client->ps.forcePowersActive : cg.snap->ps.forcePowersActive;
++	const int		localEFlags = localGent ? localGent->s.eFlags : cg.snap->ps.eFlags;
++
++	float speed = cg.refdef.fov_y / 75.0 * ((localForcePowers&(1<<FP_SPEED))?1.0f:Q_min(cg_timescale.value, 1.0f));
+ 
+ //FIXME: junk code, BUG:168
+ 
+ static bool wasForceSpeed=false;
+-bool isForceSpeed=cg_entities[0].gent->client->ps.forcePowersActive&(1<<FP_SPEED)?true:false;
++bool isForceSpeed=localForcePowers&(1<<FP_SPEED)?true:false;
+ if (isForceSpeed&&!wasForceSpeed)
+ {
+ 	CGCam_Smooth(0.75f,5000);
+@@ -1879,11 +1889,11 @@ wasForceSpeed=isForceSpeed;
+ 	float mYawOverride = 0.0f;
+ 	if ( cg.snap->ps.clientNum == 0 )
+ 	{//pointless check, but..
+-		if ( cg_entities[0].gent->s.eFlags & EF_LOCKED_TO_WEAPON )
++		if ( localEFlags & EF_LOCKED_TO_WEAPON )
+ 		{
+ 			speed *= 0.25f;
+ 		}
+-		if ( cg_entities[0].gent->s.eFlags & EF_IN_ATST )
++		if ( localEFlags & EF_IN_ATST )
+ 		{
+ 			mPitchOverride = 0.01f;
+ 			mYawOverride = 0.0075f;
+diff --git a/codeJK2/cgame/cg_weapons.cpp b/codeJK2/cgame/cg_weapons.cpp
+index 6bfbbd5a..88df39c9 100644
+--- a/codeJK2/cgame/cg_weapons.cpp
++++ b/codeJK2/cgame/cg_weapons.cpp
+@@ -919,6 +919,18 @@ void CG_AddViewWeapon( playerState_t *ps )
+ 
+ 	cent = &cg_entities[ps->clientNum];
+ 
++	// dual-load: the first-person view weapon is rendered almost entirely from
++	// the local player's server gentity (cent->gent->client->renderInfo, the
++	// ghoul2 model, lowerLumbarBone, force-power state). On a serverless remote
++	// client g_entities[ps->clientNum].client is null, so none of that exists
++	// yet. Skip the viewmodel this frame rather than fault; the world still
++	// renders. A snapshot-backed viewmodel is future work. The host keeps its
++	// real gent path.
++	if ( !cent->gent || !cent->gent->client )
++	{
++		return;
++	}
++
+ 	if ( ps->eFlags & EF_LOCKED_TO_WEAPON )
+ 	{
+ 		return;

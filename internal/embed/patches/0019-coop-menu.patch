@@ -1,0 +1,204 @@
+diff --git a/code/ui/ui_main.cpp b/code/ui/ui_main.cpp
+index 4a20f0e..b78ed79 100644
+--- a/code/ui/ui_main.cpp
++++ b/code/ui/ui_main.cpp
+@@ -97,6 +97,16 @@ void ReadSaveDirectory (void);
+ void Item_RunScript(itemDef_t *item, const char *s);
+ qboolean Item_SetFocus(itemDef_t *item, float x, float y);
+ 
++// D3: co-op server-list accessors, defined in cl_main.cpp (same binary; cls
++// lives there). The feeder + coop verbs read the LAN-discovered hosts through
++// these.
++extern int         CL_GetCoopServerCount( void );
++extern const char *CL_GetCoopServerText( int index );
++extern qboolean    CL_GetCoopServerAddress( int index, char *out, int outSize );
++// The row currently selected in the co-op server feeder (tracked below).
++static int ui_coopServerSelection = 0;
++static float UI_GetCoopServerSelection( void ) { return (float)ui_coopServerSelection; }
++
+ qboolean		Asset_Parse(char **buffer);
+ menuDef_t		*Menus_FindByName(const char *p);
+ void			Menus_HideItems(const char *menuName);
+@@ -679,7 +689,11 @@ const char *UI_FeederItemText(float feederID, int index, int column, qhandle_t *
+ {
+ 	*handle = -1;
+ 
+-	if (feederID == FEEDER_SAVEGAMES)
++	if (feederID == FEEDER_COOP_SERVERS)	// D3
++	{
++		return CL_GetCoopServerText( index );
++	}
++	else if (feederID == FEEDER_SAVEGAMES)
+ 	{
+ 		if (column==0)
+ 		{
+@@ -1574,6 +1588,38 @@ static qboolean UI_RunMenuScript ( const char **args )
+ 		{
+ 			// TODO for MAC_PORT, will only be valid for non-JK2 mode
+ 		}
++		// D3: co-op menu verbs. They drive the D1/D2 console commands.
++		else if ( Q_stricmp( name, "coopHost" ) == 0 )
++		{
++			// Host the current game. ui_coopMaxPlayers (2-4) is passed through.
++			const int mp = (int)trap_Cvar_VariableValue( "ui_coopMaxPlayers" );
++			ui.Cmd_ExecuteText( EXEC_APPEND, va( "coop_host %i\n", mp > 0 ? mp : 2 ) );
++		}
++		else if ( Q_stricmp( name, "coopRefresh" ) == 0 )
++		{
++			// Rescan the LAN for co-op hosts (D2). The feeder reads cls.localServers.
++			ui.Cmd_ExecuteText( EXEC_APPEND, "localservers\n" );
++		}
++		else if ( Q_stricmp( name, "coopJoin" ) == 0 )
++		{
++			// Connect to the host selected in the server-list feeder.
++			int sel = (int)UI_GetCoopServerSelection();
++			char addr[64];
++			if ( CL_GetCoopServerAddress( sel, addr, sizeof( addr ) ) )
++			{
++				ui.Cmd_ExecuteText( EXEC_APPEND, va( "connect %s\n", addr ) );
++			}
++		}
++		else if ( Q_stricmp( name, "coopConnect" ) == 0 )
++		{
++			// Direct-connect to the address typed into the ui_coopAddress field.
++			char addr[64];
++			Cvar_VariableStringBuffer( "ui_coopAddress", addr, sizeof( addr ) );
++			if ( addr[0] )
++			{
++				ui.Cmd_ExecuteText( EXEC_APPEND, va( "connect %s\n", addr ) );
++			}
++		}
+ 		else
+ 		{
+ 			Com_Printf("unknown UI script %s\n", name);
+@@ -1809,7 +1855,11 @@ UI_FeederCount
+ */
+ static int UI_FeederCount(float feederID)
+ {
+-	if (feederID == FEEDER_SAVEGAMES )
++	if (feederID == FEEDER_COOP_SERVERS )	// D3
++	{
++		return CL_GetCoopServerCount();
++	}
++	else if (feederID == FEEDER_SAVEGAMES )
+ 	{
+ 		if (s_savegame.saveFileCnt == -1)
+ 		{
+@@ -1879,7 +1929,11 @@ UI_FeederSelection
+ */
+ static void UI_FeederSelection(float feederID, int index, itemDef_t *item)
+ {
+-	if (feederID == FEEDER_SAVEGAMES)
++	if (feederID == FEEDER_COOP_SERVERS)	// D3
++	{
++		ui_coopServerSelection = index;
++	}
++	else if (feederID == FEEDER_SAVEGAMES)
+ 	{
+ 		s_savegame.currentLine = index;
+ 		UI_HandleLoadSelection();
+diff --git a/code/ui/ui_atoms.cpp b/code/ui/ui_atoms.cpp
+index eea3df8..a3ddbb7 100644
+--- a/code/ui/ui_atoms.cpp
++++ b/code/ui/ui_atoms.cpp
+@@ -97,6 +97,20 @@ void UI_SetActiveMenu( const char* menuname,const char *menuID )
+ 		return;
+ 	}
+ 
++	// D3: the Co-op page. Activate it directly (like missionfailed_menu) so it
++	// works whether reached from the main menu or in-game, and pause if a game is
++	// running so it overlays cleanly.
++	if ( Q_stricmp (menuname, "coopMenu") == 0 )
++	{
++		if ( cls.state == CA_ACTIVE ) {
++			ui.Cvar_Set( "cl_paused", "1" );
++		}
++		Menus_CloseAll();
++		Menus_ActivateByName("coopMenu");
++		ui.Key_SetCatcher( KEYCATCH_UI );
++		return;
++	}
++
+ 	if ( Q_stricmp (menuname, "datapad") == 0 )
+ 	{
+ 		ui.Cvar_Set( "cl_paused", "1" );
+diff --git a/code/ui/menudef.h b/code/ui/menudef.h
+index 63d0970..ef21939 100644
+--- a/code/ui/menudef.h
++++ b/code/ui/menudef.h
+@@ -97,6 +97,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
+ #define FEEDER_MOVES						0x15			// moves for the data pad moves screen
+ #define FEEDER_MOVES_TITLES					0x16			// move titles for the data pad moves screen
+ #define FEEDER_LANGUAGES					0x17			// the list of languages
++#define FEEDER_COOP_SERVERS					0x18			// D3: LAN co-op hosts (cls.localServers)
+ 
+ 
+ #define UI_VERSION				200
+diff --git a/code/client/cl_ui.cpp b/code/client/cl_ui.cpp
+index 80d002f..9813982 100644
+--- a/code/client/cl_ui.cpp
++++ b/code/client/cl_ui.cpp
+@@ -330,7 +330,14 @@ void CL_GenericMenu_f(void)
+ 	const char *arg = Cmd_Argv( 1 );
+ 
+ 	if (cls.uiStarted) {
+-		UI_SetActiveMenu("ingame",arg);
++		// D3: `uimenu coopMenu` opens the Co-op page directly (UI_SetActiveMenu
++		// has a case for it). Everything else keeps the historic behaviour of
++		// opening the in-game menu with the argument as its sub-menu id.
++		if ( arg[0] && !Q_stricmp( arg, "coopMenu" ) ) {
++			UI_SetActiveMenu( "coopMenu", NULL );
++		} else {
++			UI_SetActiveMenu("ingame",arg);
++		}
+ 	}
+ }
+ 
+diff --git a/code/client/cl_main.cpp b/code/client/cl_main.cpp
+index 5be3e75..3f3344b 100644
+--- a/code/client/cl_main.cpp
++++ b/code/client/cl_main.cpp
+@@ -700,6 +700,43 @@ void CL_LocalServers_f( void ) {
+ 	}
+ }
+ 
++/*
++===================
++CL co-op server-list accessors (D3)
++
++The in-engine SP UI reads the LAN-discovered hosts (cls.localServers, filled by
++D2's localservers command) through these. Kept here because cls lives in this
++module; the UI extern-declares them.
++===================
++*/
++int CL_GetCoopServerCount( void ) {
++	return cls.numLocalServers;
++}
++
++// Fill 'out' with a display line for row 'index' ("Host - map (n/m)"). Returns
++// the empty string for an out-of-range row.
++const char *CL_GetCoopServerText( int index ) {
++	static char line[MAX_INFO_STRING];
++	if ( index < 0 || index >= cls.numLocalServers ) {
++		return "";
++	}
++	const localServer_t *ls = &cls.localServers[index];
++	Com_sprintf( line, sizeof( line ), "%s  -  %s  (%i/%i)",
++		ls->hostname[0] ? ls->hostname : "?",
++		ls->mapname[0] ? ls->mapname : "?",
++		ls->clients, ls->maxClients );
++	return line;
++}
++
++// Fill 'out' with "ip:port" for row 'index'. Returns qfalse if out of range.
++qboolean CL_GetCoopServerAddress( int index, char *out, int outSize ) {
++	if ( index < 0 || index >= cls.numLocalServers || !out || outSize <= 0 ) {
++		return qfalse;
++	}
++	Q_strncpyz( out, NET_AdrToString( cls.localServers[index].adr ), outSize );
++	return qtrue;
++}
++
+ void CL_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
+ 	char	*s;
+ 	const char	*c;

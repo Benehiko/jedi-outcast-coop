@@ -65,19 +65,32 @@ files — your game install is never copied from or modified.
 | Windows | [docs/install-windows.md](docs/install-windows.md) | PowerShell installer; co-op verified live |
 | macOS | [docs/install-macos.md](docs/install-macos.md) | one-command installer (not yet run on real hardware) |
 
-The fastest path from a fresh clone to playing is one command:
+The fastest path to playing is one command. A **pre-built `jk2coop`
+binary carries the engine source inside it**, so you need neither a git
+clone nor the submodule — download the binary and run:
+
+    ./jk2coop setup                    # build the engine and install — guided
+
+`setup` extracts the embedded OpenJK source into a work directory
+(`~/.cache/jk2coop`), applies the co-op patches, builds the engine, and
+installs — all in one step, with no git and no network. If the build
+toolchain (cmake, ninja, a C compiler) is missing, it prints the exact
+command to install it for your OS, or — if you have
+[`vee`](https://github.com/Benehiko/vee) — offers to build inside a clean
+throwaway VM so you never install a compiler at all.
+
+Building `jk2coop` yourself from a clone works too:
 
     git clone --recurse-submodules https://github.com/Benehiko/jedi-outcast-coop
     cd jedi-outcast-coop
-    make build                         # produces ./jk2coop (or download a pre-built binary, below)
-    ./jk2coop setup                    # fetch submodule, build the engine, and install — guided
+    make build                         # produces ./jk2coop
+    ./jk2coop setup                    # same guided setup, from the embedded source
 
-`setup` initialises the OpenJK submodule, applies the co-op patches,
-builds the engine, and installs — all in one step. If the build toolchain
-(cmake, ninja, a C compiler) is missing, it prints the exact command to
-install it for your OS, or — if you have [`vee`](https://github.com/Benehiko/vee)
-— offers to build inside a clean throwaway VM so you never install a
-compiler at all.
+The engine source is baked into the binary at build time; see
+[docs/embedded-source.md](docs/embedded-source.md) for how it is pruned,
+patched in pure Go, and kept in sync with the pinned submodule. To build
+against the submodule instead (for patch development), pass
+`jk2coop setup --repo .` from inside the checkout.
 
 The individual commands, once built ([docs/building.md](docs/building.md)):
 

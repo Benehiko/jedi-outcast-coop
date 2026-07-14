@@ -12,6 +12,7 @@ import (
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 	"github.com/Benehiko/jedi-outcast-coop/internal/launch"
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
+	"github.com/Benehiko/jedi-outcast-coop/internal/workdir"
 )
 
 // launchParams are the resolved options shared by the launch/host/join commands.
@@ -26,13 +27,9 @@ type launchParams struct {
 // runLaunch resolves the platform + config and runs (or prints) the engine for
 // the given mode and connect address.
 func runLaunch(cmd *cobra.Command, lp *launchParams, mode launch.Mode, connect string, extra []string) error {
-	root, err := project.Root(lp.repo)
+	buildDir, err := resolveLaunchBuildDir(lp)
 	if err != nil {
 		return err
-	}
-	buildDir := lp.buildDir
-	if buildDir == "" {
-		buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
 	}
 
 	// Refresh the installed autoexec from the config so any settings change made
@@ -61,6 +58,29 @@ func runLaunch(cmd *cobra.Command, lp *launchParams, mode launch.Mode, connect s
 		return nil
 	}
 	return notBuiltHint(launch.Run(p, opts))
+}
+
+// resolveLaunchBuildDir resolves the engine build directory, in priority order:
+// an explicit --build flag, $JK2_BUILD, the repo submodule build dir (dev flow,
+// when --repo is given or the cwd is inside a checkout), and finally the
+// standalone work-dir build (~/.cache/jk2coop/src/build). Launching must work
+// after a standalone install with no repo present, so a missing repo is not
+// fatal here.
+func resolveLaunchBuildDir(lp *launchParams) (string, error) {
+	if lp.buildDir != "" {
+		return lp.buildDir, nil
+	}
+	if v := install.EnvOr("JK2_BUILD", ""); v != "" {
+		return v, nil
+	}
+	if root, err := project.Root(lp.repo); err == nil {
+		return filepath.Join(root, "openjk", "build"), nil
+	}
+	wd, err := workdir.Resolve()
+	if err != nil {
+		return "", err
+	}
+	return wd.Build(), nil
 }
 
 // addLaunchFlags wires the shared flags onto a command.

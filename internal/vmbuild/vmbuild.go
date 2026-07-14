@@ -45,23 +45,26 @@ func Available() bool {
 	return err == nil
 }
 
-// Build creates (or reuses) the build VM with repoRoot shared over virtiofs,
-// installs the build dependencies inside it, and runs the engine build. On
-// success the artifacts are present under repoRoot/openjk/build on the host
-// (the guest writes them back through the virtiofs share). Progress streams to
-// out. The co-op patches must already be applied to repoRoot on the host.
-func Build(ctx context.Context, repoRoot string, out io.Writer) error {
+// Build creates (or reuses) the build VM with shareDir shared over virtiofs,
+// installs the build dependencies inside it, and runs the engine build. srcSub
+// is the OpenJK source directory RELATIVE to shareDir (e.g. "openjk" for the dev
+// repo flow, "src" for the standalone work-dir flow); the build writes to
+// <srcSub>/build. On success the artifacts appear under shareDir/<srcSub>/build
+// on the host (the guest writes them back through the virtiofs share). Progress
+// streams to out. The co-op patches must already be applied to the shared tree
+// on the host.
+func Build(ctx context.Context, shareDir, srcSub string, out io.Writer) error {
 	if !Available() {
 		return fmt.Errorf("vee not found on PATH; install it or build on this machine instead")
 	}
 
-	_, _ = fmt.Fprintf(out, "Creating build VM %q (sharing %s over virtiofs)…\n", VMName, repoRoot)
-	if err := create(ctx, repoRoot, out); err != nil {
+	_, _ = fmt.Fprintf(out, "Creating build VM %q (sharing %s over virtiofs)…\n", VMName, shareDir)
+	if err := create(ctx, shareDir, out); err != nil {
 		return err
 	}
 
 	_, _ = fmt.Fprintln(out, "Building the engine inside the VM (installing deps, then cmake)…")
-	return run(ctx, out, remoteScript()...)
+	return run(ctx, out, remoteScript(srcSub)...)
 }
 
 // Delete removes the build VM and its disks. Callers offer this as a prompt
@@ -118,11 +121,12 @@ func run(ctx context.Context, out io.Writer, args ...string) error {
 // dependency set, then configure and build with the same flags as the host build
 // (gfx.ConfigureArgs). The co-op patches are already applied on the host to the
 // shared tree, so the VM only compiles — no patch step here.
-func buildScript() string {
-	cmake := "cmake -S openjk -B openjk/build " + strings.Join(gfx.ConfigureArgs, " ")
+func buildScript(srcSub string) string {
+	build := srcSub + "/build"
+	cmake := "cmake -S " + srcSub + " -B " + build + " " + strings.Join(gfx.ConfigureArgs, " ")
 	return strings.Join([]string{
 		"set -eu",
-		// Mount the shared host repo if the template did not already.
+		// Mount the shared host dir if the template did not already.
 		"sudo mkdir -p " + guestMount,
 		"mountpoint -q " + guestMount + " || sudo mount -t virtiofs " + virtiofsTag + " " + guestMount,
 		"export DEBIAN_FRONTEND=noninteractive",
@@ -130,7 +134,7 @@ func buildScript() string {
 		"sudo apt-get install -y --no-install-recommends " + prereq.AptPackages,
 		"cd " + guestMount,
 		cmake,
-		"cmake --build openjk/build",
+		"cmake --build " + build,
 	}, "\n")
 }
 
@@ -139,8 +143,8 @@ func buildScript() string {
 // args and re-parses them through the guest's login shell, which mangles spaces,
 // quotes, and `&&`. To be immune to that, base64-encode the whole script and
 // decode+run it remotely — the transmitted command is a single quote-free token.
-func remoteScript() []string {
-	enc := base64.StdEncoding.EncodeToString([]byte(buildScript()))
+func remoteScript(srcSub string) []string {
+	enc := base64.StdEncoding.EncodeToString([]byte(buildScript(srcSub)))
 	remote := "echo " + enc + " | base64 -d | bash"
 	return []string{"ssh", VMName, "--", remote}
 }

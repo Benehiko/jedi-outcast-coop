@@ -1,0 +1,109 @@
+diff --git a/code/qcommon/net_ip.cpp b/code/qcommon/net_ip.cpp
+index 15438032..5b47a4d3 100644
+--- a/code/qcommon/net_ip.cpp
++++ b/code/qcommon/net_ip.cpp
+@@ -443,3 +443,31 @@ void NET_Init( void ) {
+ 
+ 	NET_OpenIP();
+ }
++
++/*
++====================
++NET_Restart
++
++Re-open the UDP socket to reflect the current net_enabled / net_ip / net_port
++cvar values, at runtime. net_enabled and net_port are CVAR_LATCH and are only
++read in NET_Init at startup; re-fetching them through Cvar_Get here applies any
++latched value (see Cvar_Get's latch handling), so a game that started as a plain
++loopback session can begin hosting without a restart. Used by the coop_host
++command. NET_Init's own semantics are unchanged.
++====================
++*/
++void NET_Restart( void ) {
++	NET_Shutdown();
++
++	// Re-fetch the cvars so a value that was latched (set after startup) takes
++	// effect now.
++	net_enabled = Cvar_Get( "net_enabled", "0", CVAR_LATCH | CVAR_ARCHIVE );
++	net_ip      = Cvar_Get( "net_ip",      "0.0.0.0", CVAR_LATCH );
++	net_port    = Cvar_Get( "net_port",    "29070", CVAR_LATCH );
++
++	if ( !net_enabled->integer ) {
++		return;
++	}
++
++	NET_OpenIP();
++}
+diff --git a/code/qcommon/qcommon.h b/code/qcommon/qcommon.h
+index 659298cb..ca583db3 100644
+--- a/code/qcommon/qcommon.h
++++ b/code/qcommon/qcommon.h
+@@ -134,6 +134,7 @@ typedef enum {
+ // in which case a plain singleplayer session never opens a socket.
+ void		NET_Init( void );
+ void		NET_Shutdown( void );
++void		NET_Restart( void );	// re-open the socket for the current cvars (coop_host)
+ qboolean	NET_GetPacket( netadr_t *net_from, msg_t *net_message );
+ qboolean	NET_IsSocketOpen( void );
+ 
+diff --git a/code/server/sv_ccmds.cpp b/code/server/sv_ccmds.cpp
+index 782516bd..e4faf7f6 100644
+--- a/code/server/sv_ccmds.cpp
++++ b/code/server/sv_ccmds.cpp
+@@ -478,6 +478,48 @@ static void SV_CompleteSaveName( char *args, int argNum ) {
+ SV_AddOperatorCommands
+ ==================
+ */
++/*
++==================
++SV_CoopHost_f
++
++coop_host [maxplayers] — start hosting the current singleplayer game over the
++network without a restart or any command-line flags. Enables networking and
++(re)opens the UDP socket via NET_Restart, then prints the port a second machine
++should connect to. maxplayers is accepted and stored for a later task (the
++client cap); it does nothing on its own yet.
++==================
++*/
++static int sv_coopMaxPlayers = 0;	// stored for a future max-clients task (E5)
++
++static void SV_CoopHost_f( void ) {
++	if ( !com_sv_running->integer ) {
++		Com_Printf( "coop_host: no game is running — load a map first.\n" );
++		return;
++	}
++
++	if ( Cmd_Argc() > 1 ) {
++		sv_coopMaxPlayers = atoi( Cmd_Argv( 1 ) );
++	}
++
++	// Enable networking and (re)bind the socket for the current cvars. net_enabled
++	// is CVAR_LATCH; NET_Restart re-reads it so this takes effect immediately.
++	Cvar_Set( "net_enabled", "1" );
++	NET_Restart();
++
++	if ( !NET_IsSocketOpen() ) {
++		Com_Printf( "coop_host: failed to open a network socket.\n" );
++		return;
++	}
++
++	// net_port holds the port actually bound (NET_OpenIP scans 29070-29079).
++	const int port = Cvar_VariableIntegerValue( "net_port" );
++	Com_Printf( "^2Co-op hosting on port %i.\n", port );
++	Com_Printf( "A second machine can join with:  connect <this-machine-ip>:%i\n", port );
++	if ( sv_coopMaxPlayers > 0 ) {
++		Com_Printf( "(max players requested: %i)\n", sv_coopMaxPlayers );
++	}
++}
++
+ void SV_AddOperatorCommands( void ) {
+ 	static qboolean	initialized;
+ 
+@@ -486,6 +528,7 @@ void SV_AddOperatorCommands( void ) {
+ 	}
+ 	initialized = qtrue;
+ 
++	Cmd_AddCommand ("coop_host", SV_CoopHost_f);
+ 	Cmd_AddCommand ("status", SV_Status_f);
+ 	Cmd_AddCommand ("serverinfo", SV_Serverinfo_f);
+ 	Cmd_AddCommand ("systeminfo", SV_Systeminfo_f);

@@ -69,3 +69,24 @@ jobs:
           git -C openjk status --short | sed 's/^/  /'
           # Fail if, somehow, nothing changed (would mean patches silently no-op'd).
           test -n "$(git -C openjk status --short)"
+
+  embed-in-sync:
+    name: embedded source matches the submodule pin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with OpenJK submodule)
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # `make generate` re-tars the pruned source at the submodule HEAD and
+      # re-mirrors patches/ + assets/coop-ui/ into internal/embed. If that
+      # produces any diff, the committed embed drifted from the pin (a submodule
+      # bump or patch edit that forgot `make generate`) — fail so it can't ship.
+      - name: Regenerate the embed and assert no diff
+        run: make verify-embed
