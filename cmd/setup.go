@@ -10,11 +10,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/config"
+	embedpkg "github.com/Benehiko/jedi-outcast-coop/internal/embed"
 	"github.com/Benehiko/jedi-outcast-coop/internal/gfx"
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 	"github.com/Benehiko/jedi-outcast-coop/internal/prereq"
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
 	"github.com/Benehiko/jedi-outcast-coop/internal/vmbuild"
+	"github.com/Benehiko/jedi-outcast-coop/internal/workdir"
 )
 
 func newSetupCmd() *cobra.Command {
@@ -39,77 +41,142 @@ func newSetupCmd() *cobra.Command {
 			if useVM && useHost {
 				return fmt.Errorf("--vm and --host are mutually exclusive")
 			}
-			root, err := project.Root(repo)
-			if err != nil {
-				return err
+			if repo != "" {
+				// Dev flow: build from the repo checkout + git submodule.
+				return setupFromRepo(cmd, repo, buildDir, gamedata, useVM, useHost, yes)
 			}
-			if buildDir == "" {
-				buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
-			}
-			out := cmd.OutOrStdout()
-			ctx := cmd.Context()
-
-			// 1. Submodule.
-			if err := ensureSubmodule(ctx, root, out); err != nil {
-				return err
-			}
-
-			// 2. Decide the build method up front, before mutating the submodule,
-			// so a doomed host build (missing toolchain, no VM) fails fast without
-			// leaving a patched tree behind.
-			buildInVM, err := chooseVMBuild(cmd, useVM, useHost, yes)
-			if err != nil {
-				return err
-			}
-
-			// 3. Apply the co-op patches for the configured graphics selection (same
-			// operation as the graphics menu and install-time rebuild). Always done on
-			// the host — it only needs git, no build toolchain — so a VM build shares
-			// an already-patched tree over virtiofs and just compiles it. This keeps
-			// the built feature set honest to the config (unlike apply-patches.sh,
-			// which unconditionally applies every feature patch).
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-			mgr := &gfx.Manager{
-				Submodule:  filepath.Join(root, "openjk"),
-				PatchesDir: filepath.Join(root, "patches"),
-			}
-			_, _ = fmt.Fprintf(out, "Applying co-op patches (%s)…\n", gfx.SummaryLine(cfg.GfxSelection()))
-			if _, err := mgr.Apply(ctx, cfg.GfxSelection()); err != nil {
-				return err
-			}
-
-			// 4. Build — host or VM.
-			if buildInVM {
-				if err := vmbuild.Build(ctx, root, out); err != nil {
-					return err
-				}
-				if err := maybeDeleteVM(cmd, yes); err != nil {
-					return err
-				}
-			} else {
-				_, _ = fmt.Fprintln(out, "Building the engine on this machine…")
-				if err := gfx.Build(ctx, filepath.Join(root, "openjk"), buildDir, out); err != nil {
-					return err
-				}
-			}
-
-			// 5. Install.
-			_, _ = fmt.Fprintln(out, "Installing…")
-			return runInstall(cmd, root, buildDir, gamedata, yes)
+			// Standalone flow: extract the embedded source into the work dir,
+			// patch it in pure Go, build, and install — no repo, no git.
+			return setupStandalone(cmd, buildDir, gamedata, useVM, useHost, yes)
 		},
 	}
 
 	f := cmd.Flags()
-	f.StringVar(&repo, "repo", "", "repository root (default: autodetect from cwd)")
-	f.StringVar(&buildDir, "build", "", "OpenJK CMake build dir (default: <repo>/openjk/build or $JK2_BUILD)")
+	f.StringVar(&repo, "repo", "", "dev only: build from this repo checkout + git submodule instead of the embedded source")
+	f.StringVar(&buildDir, "build", "", "OpenJK CMake build dir (default: <workdir>/src/build or $JK2_BUILD)")
 	f.StringVar(&gamedata, "gamedata", "", "path to your Jedi Outcast GameData dir (default: Steam autodetect)")
 	f.BoolVar(&useVM, "vm", false, "build inside a throwaway VM via vee (no local toolchain needed)")
 	f.BoolVar(&useHost, "host", false, "build on this machine (requires the build toolchain)")
 	f.BoolVarP(&yes, "yes", "y", false, "assume \"yes\" to prompts (non-interactive)")
 	return cmd
+}
+
+// setupStandalone runs the embedded-source setup: resolve the work dir, extract
+// + patch the baked-in OpenJK source for the configured graphics selection,
+// build (host or VM), then install. Needs neither a repo checkout nor git.
+func setupStandalone(cmd *cobra.Command, buildDir, gamedata string, useVM, useHost, yes bool) error {
+	out := cmd.OutOrStdout()
+	ctx := cmd.Context()
+
+	wd, err := workdir.Resolve()
+	if err != nil {
+		return err
+	}
+	if buildDir == "" {
+		buildDir = install.EnvOr("JK2_BUILD", wd.Build())
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	// Decide the build method up front so a doomed host build (missing
+	// toolchain, no VM) fails fast before we extract and patch.
+	buildInVM, err := chooseVMBuild(cmd, useVM, useHost, yes)
+	if err != nil {
+		return err
+	}
+
+	// Extract the embedded source and apply the co-op patches for the selection.
+	mgr := &gfx.EmbedManager{Dir: wd}
+	_, _ = fmt.Fprintf(out, "Preparing engine source (%s)…\n", gfx.SummaryLine(cfg.GfxSelection()))
+	if _, err := mgr.Apply(ctx, cfg.GfxSelection()); err != nil {
+		return err
+	}
+
+	// Build — host or VM. The VM shares the work-dir root over virtiofs and
+	// builds its "src" subdir (already patched on the host).
+	if buildInVM {
+		if err := vmbuild.Build(ctx, wd.Root, "src", out); err != nil {
+			return err
+		}
+		if err := maybeDeleteVM(cmd, yes); err != nil {
+			return err
+		}
+	} else {
+		_, _ = fmt.Fprintln(out, "Building the engine on this machine…")
+		if err := gfx.Build(ctx, wd.Src(), buildDir, out); err != nil {
+			return err
+		}
+	}
+
+	// Extract the co-op UI assets for the installer to pak, then install.
+	if err := embedCoopUI(wd); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(out, "Installing…")
+	return runInstallStandalone(cmd, wd, buildDir, gamedata, yes)
+}
+
+// setupFromRepo is the legacy dev flow: build from the repo checkout and git
+// submodule (git-based patch apply, submodule reset), unchanged behaviour.
+func setupFromRepo(cmd *cobra.Command, repo, buildDir, gamedata string, useVM, useHost, yes bool) error {
+	root, err := project.Root(repo)
+	if err != nil {
+		return err
+	}
+	if buildDir == "" {
+		buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
+	}
+	out := cmd.OutOrStdout()
+	ctx := cmd.Context()
+
+	if err := ensureSubmodule(ctx, root, out); err != nil {
+		return err
+	}
+	buildInVM, err := chooseVMBuild(cmd, useVM, useHost, yes)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	mgr := &gfx.Manager{
+		Submodule:  filepath.Join(root, "openjk"),
+		PatchesDir: filepath.Join(root, "patches"),
+	}
+	_, _ = fmt.Fprintf(out, "Applying co-op patches (%s)…\n", gfx.SummaryLine(cfg.GfxSelection()))
+	if _, err := mgr.Apply(ctx, cfg.GfxSelection()); err != nil {
+		return err
+	}
+	if buildInVM {
+		if err := vmbuild.Build(ctx, root, "openjk", out); err != nil {
+			return err
+		}
+		if err := maybeDeleteVM(cmd, yes); err != nil {
+			return err
+		}
+	} else {
+		_, _ = fmt.Fprintln(out, "Building the engine on this machine…")
+		if err := gfx.Build(ctx, filepath.Join(root, "openjk"), buildDir, out); err != nil {
+			return err
+		}
+	}
+	_, _ = fmt.Fprintln(out, "Installing…")
+	return runInstall(cmd, root, buildDir, gamedata, yes)
+}
+
+// embedCoopUI extracts the baked-in co-op UI assets into the work dir so the
+// installer can build zz-coop-ui.pk3 from them. ExtractCoopUI writes a coop-ui/
+// subdir under its argument, so passing the work-dir root lands the assets at
+// wd.CoopUI() (<root>/coop-ui).
+func embedCoopUI(wd workdir.Dir) error {
+	if err := os.MkdirAll(wd.Root, 0o755); err != nil {
+		return err
+	}
+	return embedpkg.ExtractCoopUI(wd.Root)
 }
 
 // ensureSubmodule initialises the OpenJK submodule when it is not yet a git

@@ -2,21 +2,33 @@
 
 ## Quick start (one command)
 
-Most people should not run the manual steps below. From a fresh clone:
+Most people should not run the manual steps below. A pre-built `jk2coop`
+binary embeds the engine source, so setup needs no clone and no submodule:
+
+```sh
+./jk2coop setup       # extract embedded source + patches + engine build + install
+```
+
+Or build `jk2coop` from a clone first:
 
 ```sh
 git clone --recurse-submodules <repo>
 cd jedi-outcast-coop
 make build            # produces ./jk2coop
-./jk2coop setup       # submodule + patches + engine build + install, guided
+./jk2coop setup       # same guided setup, from the embedded source
 ```
 
 `jk2coop setup` does everything the manual sections below describe, in order,
 and stops with a clear, copy-paste install command if a build tool is missing.
 If you have [`vee`](https://github.com/Benehiko/vee) it can also build the
 engine inside a disposable VM, so you never install a C/C++ toolchain on the
-host — `setup` prompts for this (or force it with `--vm` / `--host`). The rest
-of this document is the manual reference `setup` automates.
+host — `setup` prompts for this (or force it with `--vm` / `--host`).
+
+By default `setup` builds from the **source embedded in the binary**, extracted
+to `~/.cache/jk2coop` — see [embedded-source.md](embedded-source.md). The manual
+sections below operate on the `openjk/` submodule directly and are the reference
+for **patch development**; to make `setup` use the submodule instead of the
+embedded source, pass `--repo .` from inside a checkout.
 
 ## Repository layout
 

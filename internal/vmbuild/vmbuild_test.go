@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildScriptContents(t *testing.T) {
-	s := buildScript()
+	s := buildScript("openjk")
 	for _, want := range []string{
 		"set -eu",
 		"mount -t virtiofs " + virtiofsTag,
@@ -31,7 +31,7 @@ func TestBuildScriptContents(t *testing.T) {
 }
 
 func TestRemoteScriptDecodes(t *testing.T) {
-	args := remoteScript()
+	args := remoteScript("openjk")
 	// Shape: ssh <vm> -- <remote command>
 	if len(args) != 4 || args[0] != "ssh" || args[1] != VMName || args[2] != "--" {
 		t.Fatalf("unexpected argv: %v", args)
@@ -53,7 +53,7 @@ func TestRemoteScriptDecodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("payload is not valid base64: %v", err)
 	}
-	if string(decoded) != buildScript() {
+	if string(decoded) != buildScript("openjk") {
 		t.Fatalf("decoded payload != buildScript()")
 	}
 }

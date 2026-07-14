@@ -1,0 +1,600 @@
+diff --git a/code/CMakeLists.txt b/code/CMakeLists.txt
+index 3ac6ed18..49e2ca22 100644
+--- a/code/CMakeLists.txt
++++ b/code/CMakeLists.txt
+@@ -33,7 +33,11 @@ add_subdirectory("${SPDir}/rd-vanilla")
+ if(BuildSPEngine OR BuildJK2SPEngine)
+ 	# Libraries
+ 	if(WIN32)
+-		set(SPEngineLibraries "winmm")
++		# wsock32 resolves the winsock symbols (WSAStartup, socket, bind,
++		# sendto, ...) that net_ip.cpp pulls in for the co-op UDP transport.
++		# Vanilla singleplayer had no networking, so upstream only linked
++		# winmm here; the MP engine links wsock32 the same way.
++		set(SPEngineLibraries "winmm" "wsock32")
+ 	endif(WIN32)
+ 	# Defines
+ 	set(SPEngineDefines ${SharedDefines} "_JK2EXE") # it's called JK2EXE but it really just means Singleplayer Exe
+@@ -167,6 +171,7 @@ if(BuildSPEngine OR BuildJK2SPEngine)
+ 		"${SPDir}/qcommon/md4.cpp"
+ 		"${SPDir}/qcommon/msg.cpp"
+ 		"${SPDir}/qcommon/net_chan.cpp"
++		"${SPDir}/qcommon/net_ip.cpp"
+ 
+ 		"${SPDir}/qcommon/q_shared.cpp"
+ 		"${SPDir}/qcommon/q_shared.h"
+diff --git a/code/client/cl_main.cpp b/code/client/cl_main.cpp
+index 1a5c2446..88a51530 100644
+--- a/code/client/cl_main.cpp
++++ b/code/client/cl_main.cpp
+@@ -347,6 +347,56 @@ void CL_ForwardToServer_f( void ) {
+ 	}
+ }
+ 
++/*
++==================
++CL_Connect_f
++
++connect <address[:port]>
++
++The singleplayer client has only ever attached to its own server over the
++in-memory loopback, via CL_MapLoading. This drives the same code path with a
++real address. The server accepts unchallenged connects, so we enter
++CA_CHALLENGING directly rather than requesting a challenge first -- exactly
++as CL_MapLoading does for localhost.
++==================
++*/
++void CL_Connect_f( void ) {
++	const char	*server;
++
++	if ( Cmd_Argc() != 2 ) {
++		Com_Printf( "usage: connect <address[:port]>\n" );
++		return;
++	}
++
++	server = Cmd_Argv(1);
++
++	// clear nextmap so the cinematic shutdown doesn't execute it
++	Cvar_Set( "nextmap", "" );
++	CL_Disconnect();
++	Con_Close();
++
++	Q_strncpyz( cls.servername, server, sizeof(cls.servername) );
++
++	if ( !NET_StringToAdr( cls.servername, &clc.serverAddress ) ) {
++		Com_Printf( "Bad server address: %s\n", cls.servername );
++		cls.state = CA_DISCONNECTED;
++		return;
++	}
++
++	if ( clc.serverAddress.port == 0 ) {
++		clc.serverAddress.port = BigShort( (short)Cvar_VariableIntegerValue("net_port") );
++	}
++
++	Com_Printf( "%s resolved to %s\n", cls.servername, NET_AdrToString( clc.serverAddress ) );
++
++	cls.state = CA_CHALLENGING;		// so the connect screen is drawn
++	Key_SetCatcher( 0 );
++	SCR_UpdateScreen();
++	clc.connectTime = -RETRANSMIT_TIMEOUT;	// send the connect packet immediately
++
++	CL_CheckForResend();
++}
++
+ /*
+ ==================
+ CL_Disconnect_f
+@@ -1309,6 +1359,7 @@ void CL_Init( void ) {
+ 	Cmd_AddCommand ("clientinfo", CL_Clientinfo_f);
+ 	Cmd_AddCommand ("snd_restart", CL_Snd_Restart_f);
+ 	Cmd_AddCommand ("vid_restart", CL_Vid_Restart_f);
++	Cmd_AddCommand ("connect", CL_Connect_f);
+ 	Cmd_AddCommand ("disconnect", CL_Disconnect_f);
+ 	Cmd_AddCommand ("cinematic", CL_PlayCinematic_f);
+ 	Cmd_SetCommandCompletionFunc( "cinematic", CL_CompleteCinematic );
+diff --git a/code/qcommon/common.cpp b/code/qcommon/common.cpp
+index aeaff246..628952ff 100644
+--- a/code/qcommon/common.cpp
++++ b/code/qcommon/common.cpp
+@@ -885,6 +885,19 @@ int Com_EventLoop( void ) {
+ 				}
+ 			}
+ 
++			// drain the UDP socket, if one is open. The loopback polls above
++			// only ever carried this engine's own single client.
++			if ( NET_IsSocketOpen() ) {
++				while ( NET_GetPacket( &evFrom, &buf ) ) {
++					if ( com_sv_running->integer ) {
++						Com_RunAndTimeServerPacket( &evFrom, &buf );
++					} else {
++						CL_PacketEvent( evFrom, &buf );
++					}
++					MSG_Init( &buf, bufData, sizeof( bufData ) );
++				}
++			}
++
+ 			return ev.evTime;
+ 		}
+ 
+diff --git a/code/qcommon/net_chan.cpp b/code/qcommon/net_chan.cpp
+index 79bc3336..1a4763c7 100644
+--- a/code/qcommon/net_chan.cpp
++++ b/code/qcommon/net_chan.cpp
+@@ -394,6 +394,10 @@ qboolean	NET_CompareBaseAdr (netadr_t a, netadr_t b)
+ 	if (a.type == NA_LOOPBACK)
+ 		return qtrue;
+ 
++	// same omission as NET_CompareAdr: every IP address compared unequal
++	if (a.type == NA_IP)
++		return (qboolean)(a.ipi == b.ipi);
++
+ 	Com_Printf ("NET_CompareBaseAdr: bad address type\n");
+ 	return qfalse;
+ }
+@@ -404,6 +408,15 @@ const char	*NET_AdrToString (netadr_t a)
+ 
+ 	if (a.type == NA_LOOPBACK) {
+ 		Com_sprintf (s, sizeof(s), "loopback");
++	} else if (a.type == NA_BOT) {
++		Com_sprintf (s, sizeof(s), "bot");
++	} else if (a.type == NA_IP) {
++		// this branch did not exist: an NA_IP address returned the previous
++		// contents of the static buffer
++		Com_sprintf (s, sizeof(s), "%i.%i.%i.%i:%hu",
++			a.ip[0], a.ip[1], a.ip[2], a.ip[3], BigShort(a.port));
++	} else {
++		Com_sprintf (s, sizeof(s), "unknown");
+ 	}
+ 
+ 	return s;
+@@ -418,6 +431,11 @@ qboolean	NET_CompareAdr (netadr_t a, netadr_t b)
+ 	if (a.type == NA_LOOPBACK)
+ 		return qtrue;
+ 
++	// this used to print "bad address type" and return false for every IP
++	// address, so the server could never match an incoming packet to a client
++	if (a.type == NA_IP)
++		return (qboolean)(a.ipi == b.ipi && a.port == b.port);
++
+ 	Com_Printf ("NET_CompareAdr: bad address type\n");
+ 	return qfalse;
+ }
+@@ -491,16 +509,22 @@ void NET_SendLoopPacket (netsrc_t sock, int length, const void *data, netadr_t t
+ 	loop = &loopbacks[sock^1];
+ 
+ 	//Make sure there is enough free space in the buffer.
+-#ifdef _DEBUG
+-	int freeSpace;
+-	if(loop->send >= loop->get) {
+-		freeSpace = MAX_LOOPDATA - (loop->send - loop->get);
+-	} else {
+-		freeSpace = loop->get - loop->send;
+-	}
++	// This check used to be #ifdef _DEBUG. A release build therefore overran
++	// the ring silently and corrupted whatever followed it, which is a latent
++	// buffer overflow independent of anything this project changed.
++	{
++		int freeSpace;
++		if(loop->send >= loop->get) {
++			freeSpace = MAX_LOOPDATA - (loop->send - loop->get);
++		} else {
++			freeSpace = loop->get - loop->send;
++		}
+ 
+-	assert(freeSpace > length);
+-#endif // _DEBUG
++		if ( freeSpace <= length ) {
++			Com_Error( ERR_DROP, "NET_SendLoopPacket: loopback overflow (%i bytes, %i free)",
++				length, freeSpace );
++		}
++	}
+ 
+ 	//Get write position.  Wrap around if too close to end.
+ 	i = loop->send;
+@@ -543,6 +567,10 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, netadr_t to )
+ 		NET_SendLoopPacket (sock, length, data, to);
+ 		return;
+ 	}
++
++	// Anything else goes over the wire. Previously this function ended here
++	// and every non-loopback packet was silently dropped.
++	Sys_SendPacket( length, data, &to );
+ }
+ 
+ /*
+@@ -580,13 +608,16 @@ Traps "localhost" for loopback, passes everything else to system
+ =============
+ */
+ qboolean	NET_StringToAdr( const char *s, netadr_t *a ) {
++	// A bare "localhost" stays on the in-memory loopback, which is how the
++	// singleplayer client has always connected to its own server. Anything
++	// with a port, or any other host, is resolved for real -- this used to
++	// return NA_BAD unconditionally.
+ 	if (!strcmp (s, "localhost")) {
+ 		memset (a, 0, sizeof(*a));
+ 		a->type = NA_LOOPBACK;
+ 		return qtrue;
+ 	}
+ 
+-	a->type = NA_BAD;
+-	return qfalse;
++	return Sys_StringToAdr( s, a );
+ }
+ 
+diff --git a/code/qcommon/net_ip.cpp b/code/qcommon/net_ip.cpp
+new file mode 100644
+index 00000000..0f9a7ef8
+--- /dev/null
++++ b/code/qcommon/net_ip.cpp
+@@ -0,0 +1,351 @@
++/*
++===========================================================================
++UDP transport for the Jedi Outcast singleplayer engine.
++
++The singleplayer engine retains the whole Quake 3 protocol layer -- netchan
++sequencing, delta-compressed snapshots, usercmd serialisation -- but Raven
++removed the transport beneath it. NET_Init was an empty inline stub,
++NET_SendPacket silently discarded anything that was not NA_LOOPBACK, and
++NET_StringToAdr resolved only the literal string "localhost".
++
++This file restores a UDP socket layer so a second client can connect over
++the network. It is a reduced port of codemp/qcommon/net_ip.cpp: SOCKS
++proxying, broadcast scanning, and LAN-address heuristics are omitted, as
++nothing in the singleplayer engine uses them.
++
++Networking is off unless net_enabled is set, so a plain singleplayer session
++opens no socket and behaves exactly as before. When enabled, the socket binds
++every interface by default (net_ip "0.0.0.0") so a LAN client can reach it.
++===========================================================================
++*/
++
++#include "q_shared.h"
++#include "qcommon.h"
++
++#include <arpa/inet.h>
++#include <errno.h>
++#include <netdb.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <sys/types.h>
++#include <sys/select.h>
++#include <unistd.h>
++#include <fcntl.h>
++
++#define INVALID_SOCKET (-1)
++#define SOCKET_ERROR   (-1)
++
++static int   ip_socket = INVALID_SOCKET;
++
++static cvar_t *net_enabled;
++static cvar_t *net_ip;
++static cvar_t *net_port;
++
++/*
++====================
++NET_ErrorString
++====================
++*/
++const char *NET_ErrorString( void ) {
++	return strerror( errno );
++}
++
++/*
++====================
++NetadrToSockadr
++====================
++*/
++static void NetadrToSockadr( const netadr_t *a, struct sockaddr_in *s ) {
++	memset( s, 0, sizeof(*s) );
++
++	if ( a->type == NA_BROADCAST ) {
++		s->sin_family = AF_INET;
++		s->sin_port = a->port;
++		s->sin_addr.s_addr = INADDR_BROADCAST;
++	} else if ( a->type == NA_IP ) {
++		s->sin_family = AF_INET;
++		memcpy( &s->sin_addr, a->ip, sizeof(s->sin_addr) );
++		s->sin_port = a->port;
++	}
++}
++
++/*
++====================
++SockadrToNetadr
++====================
++*/
++static void SockadrToNetadr( struct sockaddr_in *s, netadr_t *a ) {
++	a->type = NA_IP;
++	memcpy( a->ip, &s->sin_addr, sizeof(a->ip) );
++	a->port = s->sin_port;
++}
++
++/*
++====================
++Sys_StringToSockaddr
++====================
++*/
++static qboolean Sys_StringToSockaddr( const char *s, struct sockaddr_in *sadr ) {
++	struct hostent *h;
++
++	memset( sadr, 0, sizeof(*sadr) );
++	sadr->sin_family = AF_INET;
++	sadr->sin_port = 0;
++
++	if ( s[0] >= '0' && s[0] <= '9' ) {
++		sadr->sin_addr.s_addr = inet_addr( s );
++		if ( sadr->sin_addr.s_addr == INADDR_NONE ) {
++			return qfalse;
++		}
++	} else {
++		if ( ( h = gethostbyname( s ) ) == NULL ) {
++			return qfalse;
++		}
++		sadr->sin_addr.s_addr = *(uint32_t *)h->h_addr_list[0];
++	}
++
++	return qtrue;
++}
++
++/*
++====================
++Sys_StringToAdr
++
++Accepts "host" or "host:port".
++====================
++*/
++qboolean Sys_StringToAdr( const char *s, netadr_t *a ) {
++	struct sockaddr_in sadr;
++	char	base[MAX_STRING_CHARS];
++	char	*port = NULL;
++
++	Q_strncpyz( base, s, sizeof(base) );
++
++	// split a trailing :port, if present
++	for ( char *p = base; *p; p++ ) {
++		if ( *p == ':' ) {
++			*p = '\0';
++			port = p + 1;
++			break;
++		}
++	}
++
++	if ( !Sys_StringToSockaddr( base, &sadr ) ) {
++		return qfalse;
++	}
++
++	SockadrToNetadr( &sadr, a );
++
++	if ( port ) {
++		a->port = htons( (short)atoi( port ) );
++	}
++
++	return qtrue;
++}
++
++/*
++====================
++NET_IPSocket
++
++A non-blocking UDP socket bound to the given interface and port.
++====================
++*/
++static int NET_IPSocket( const char *net_interface, int port ) {
++	struct sockaddr_in	address;
++	int					newsocket;
++	int					i = 1;
++
++	// "localhost", "0.0.0.0" and the empty string all map to INADDR_ANY below.
++	// Say so, rather than echoing an interface name we do not bind to.
++	if ( net_interface && net_interface[0]
++		&& Q_stricmp( net_interface, "localhost" )
++		&& Q_stricmp( net_interface, "0.0.0.0" ) ) {
++		Com_Printf( "Opening IP socket: %s:%i\n", net_interface, port );
++	} else {
++		Com_Printf( "Opening IP socket: 0.0.0.0:%i (all interfaces)\n", port );
++	}
++
++	if ( ( newsocket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP ) ) == INVALID_SOCKET ) {
++		Com_Printf( "WARNING: NET_IPSocket: socket: %s\n", NET_ErrorString() );
++		return INVALID_SOCKET;
++	}
++
++	// make it non-blocking; the engine polls rather than waits
++	if ( fcntl( newsocket, F_SETFL, O_NONBLOCK ) == SOCKET_ERROR ) {
++		Com_Printf( "WARNING: NET_IPSocket: O_NONBLOCK: %s\n", NET_ErrorString() );
++		close( newsocket );
++		return INVALID_SOCKET;
++	}
++
++	if ( setsockopt( newsocket, SOL_SOCKET, SO_BROADCAST, (char *)&i, sizeof(i) ) == SOCKET_ERROR ) {
++		Com_Printf( "WARNING: NET_IPSocket: SO_BROADCAST: %s\n", NET_ErrorString() );
++	}
++
++	memset( &address, 0, sizeof(address) );
++	address.sin_family = AF_INET;
++
++	if ( !net_interface || !net_interface[0]
++		|| !Q_stricmp( net_interface, "localhost" )
++		|| !Q_stricmp( net_interface, "0.0.0.0" ) ) {
++		address.sin_addr.s_addr = INADDR_ANY;
++	} else if ( !Sys_StringToSockaddr( net_interface, &address ) ) {
++		close( newsocket );
++		return INVALID_SOCKET;
++	}
++
++	address.sin_port = htons( (short)port );
++
++	if ( bind( newsocket, (struct sockaddr *)&address, sizeof(address) ) == SOCKET_ERROR ) {
++		Com_Printf( "WARNING: NET_IPSocket: bind: %s\n", NET_ErrorString() );
++		close( newsocket );
++		return INVALID_SOCKET;
++	}
++
++	return newsocket;
++}
++
++/*
++====================
++NET_GetPacket
++
++Reads one waiting datagram. Returns qfalse when the socket is closed or
++would block.
++====================
++*/
++qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message ) {
++	struct sockaddr_in	from;
++	socklen_t			fromlen;
++	int					ret;
++
++	if ( ip_socket == INVALID_SOCKET ) {
++		return qfalse;
++	}
++
++	fromlen = sizeof( from );
++	ret = recvfrom( ip_socket, (char *)net_message->data, net_message->maxsize, 0,
++					(struct sockaddr *)&from, &fromlen );
++
++
++	if ( ret == SOCKET_ERROR ) {
++		if ( errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNRESET ) {
++			return qfalse;
++		}
++		Com_Printf( "NET_GetPacket: %s\n", NET_ErrorString() );
++		return qfalse;
++	}
++
++	SockadrToNetadr( &from, net_from );
++	net_message->readcount = 0;
++
++	if ( ret >= net_message->maxsize ) {
++		Com_Printf( "Oversize packet from %s\n", NET_AdrToString( *net_from ) );
++		return qfalse;
++	}
++
++	net_message->cursize = ret;
++	return qtrue;
++}
++
++/*
++====================
++Sys_SendPacket
++====================
++*/
++void Sys_SendPacket( int length, const void *data, const netadr_t *to ) {
++	struct sockaddr_in	addr;
++	int					ret;
++
++	if ( to->type != NA_BROADCAST && to->type != NA_IP ) {
++		Com_Error( ERR_FATAL, "Sys_SendPacket: bad address type" );
++		return;
++	}
++
++	if ( ip_socket == INVALID_SOCKET ) {
++		return;
++	}
++
++	NetadrToSockadr( to, &addr );
++
++	ret = sendto( ip_socket, (const char *)data, length, 0,
++				  (struct sockaddr *)&addr, sizeof(addr) );
++
++	if ( ret == SOCKET_ERROR ) {
++		// a full send buffer is not an error worth reporting
++		if ( errno == EAGAIN || errno == EWOULDBLOCK ) {
++			return;
++		}
++		// some links refuse broadcasts
++		if ( errno == EADDRNOTAVAIL && to->type == NA_BROADCAST ) {
++			return;
++		}
++		Com_Printf( "NET_SendPacket: %s\n", NET_ErrorString() );
++	}
++}
++
++/*
++====================
++NET_IsSocketOpen
++====================
++*/
++qboolean NET_IsSocketOpen( void ) {
++	return (qboolean)( ip_socket != INVALID_SOCKET );
++}
++
++/*
++====================
++NET_OpenIP
++====================
++*/
++static void NET_OpenIP( void ) {
++	int port = net_port->integer;
++
++	if ( ip_socket != INVALID_SOCKET ) {
++		return;
++	}
++
++	// try a small range, as the requested port may be taken
++	for ( int i = 0; i < 10; i++ ) {
++		ip_socket = NET_IPSocket( net_ip->string, port + i );
++		if ( ip_socket != INVALID_SOCKET ) {
++			Cvar_SetValue( "net_port", port + i );
++			return;
++		}
++	}
++
++	Com_Printf( "WARNING: Couldn't bind to a v4 ip address.\n" );
++}
++
++/*
++====================
++NET_Shutdown
++====================
++*/
++void NET_Shutdown( void ) {
++	if ( ip_socket != INVALID_SOCKET ) {
++		close( ip_socket );
++		ip_socket = INVALID_SOCKET;
++	}
++}
++
++/*
++====================
++NET_Init
++
++Networking is off unless net_enabled is set, so a plain singleplayer
++session never opens a socket and behaves exactly as it did before.
++====================
++*/
++void NET_Init( void ) {
++	net_enabled = Cvar_Get( "net_enabled", "0", CVAR_LATCH | CVAR_ARCHIVE );
++	// Bind every interface by default so a LAN client can reach the server.
++	// Set net_ip to a specific address to restrict it, or to "localhost" for
++	// loopback only.
++	net_ip      = Cvar_Get( "net_ip",      "0.0.0.0", CVAR_LATCH );
++	net_port    = Cvar_Get( "net_port",    "29070", CVAR_LATCH );
++
++	if ( !net_enabled->integer ) {
++		return;
++	}
++
++	NET_OpenIP();
++}
+diff --git a/code/qcommon/qcommon.h b/code/qcommon/qcommon.h
+index b1647f47..659298cb 100644
+--- a/code/qcommon/qcommon.h
++++ b/code/qcommon/qcommon.h
+@@ -130,9 +130,12 @@ typedef enum {
+ 	NS_SERVER
+ } netsrc_t;
+ 
+-// For compatibility with shared code
+-static inline void NET_Init( void ) {}
+-static inline void NET_Shutdown( void ) {}
++// Implemented in net_ip.cpp. Networking stays off unless net_enabled is set,
++// in which case a plain singleplayer session never opens a socket.
++void		NET_Init( void );
++void		NET_Shutdown( void );
++qboolean	NET_GetPacket( netadr_t *net_from, msg_t *net_message );
++qboolean	NET_IsSocketOpen( void );
+ 
+ void		NET_SendPacket (netsrc_t sock, int length, const void *data, netadr_t to);
+ void		NET_OutOfBandPrint( netsrc_t net_socket, netadr_t adr, const char *format, ...);

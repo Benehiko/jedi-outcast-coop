@@ -17,12 +17,29 @@ LDFLAGS     := -s -w \
   -X $(VERSION_PKG).commit=$(COMMIT) \
   -X $(VERSION_PKG).date=$(DATE)
 
-.PHONY: all build install clean lint fmt test e2e hooks
+.PHONY: all build install clean lint fmt test e2e hooks generate verify-embed
 
 all: build
 
 build:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+# Regenerate the embedded OpenJK source archive, patches, and coop-ui assets
+# from the pinned submodule. Run after bumping the openjk submodule.
+generate:
+	$(GO) generate ./internal/embed
+
+# CI guard: regenerating the embed must produce no diff. A submodule bump (or a
+# patches/ or assets/coop-ui/ edit) that forgets `make generate` fails here, so
+# the baked-in source can never silently drift from the pin.
+verify-embed: generate
+	@if ! git diff --quiet -- internal/embed; then \
+	  echo "internal/embed is out of sync with the submodule/patches/assets." >&2; \
+	  echo "Run 'make generate' and commit the result:" >&2; \
+	  git --no-pager diff --stat -- internal/embed >&2; \
+	  exit 1; \
+	fi
+	@echo "internal/embed is in sync"
 
 # Mirror the CI lint job locally: format check (gofumpt + goimports) then lint.
 # `fmt --diff` exits 0 even when it prints a diff, so fail on a non-empty diff.

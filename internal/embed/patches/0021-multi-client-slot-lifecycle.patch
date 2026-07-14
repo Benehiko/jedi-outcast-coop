@@ -1,0 +1,82 @@
+diff --git a/code/server/sv_main.cpp b/code/server/sv_main.cpp
+--- a/code/server/sv_main.cpp
++++ b/code/server/sv_main.cpp
+@@ -367,29 +367,40 @@
+ // When a client is normally dropped, the client_t goes into a zombie state for a few seconds to make sure any final
+ //	reliable message gets resent if necessary
+ void SV_CheckTimeouts( void ) {
+-	client_t *cl = svs.clients;
+-
+ 	int droppoint = sv.time - 1000 * sv_timeout->integer;
+ 	int zombiepoint = sv.time - 1000 * sv_zombietime->integer;
+ 
+-	// message times may be wrong across a changelevel
+-	if ( cl->lastPacketTime > sv.time )
+-		cl->lastPacketTime = sv.time;
++	// E3: iterate every client slot, not just svs.clients[0]. Stock SP checked
++	// only the host slot -- fine when there was one client, but with co-op
++	// joiners it meant a disconnected joiner's slot never left CS_ZOMBIE (so it
++	// was never reclaimed and the server stayed "full"), and a joiner that
++	// stopped responding was never timed out. codemp's SV_CheckTimeouts loops
++	// the same way. Bound by MAX_CLIENTS (all allocated slots); free/zombie
++	// slots past the configured sv_maxclients are simply skipped by state.
++	client_t *cl = svs.clients;
++	for ( int i = 0; i < MAX_CLIENTS; i++, cl++ ) {
++		if ( cl->state == CS_FREE )
++			continue;
++
++		// message times may be wrong across a changelevel
++		if ( cl->lastPacketTime > sv.time )
++			cl->lastPacketTime = sv.time;
+ 
+-	if ( cl->state == CS_ZOMBIE && cl->lastPacketTime < zombiepoint ) {
+-		cl->state = CS_FREE;	// can now be reused
+-		return;
+-	}
++		if ( cl->state == CS_ZOMBIE && cl->lastPacketTime < zombiepoint ) {
++			cl->state = CS_FREE;	// can now be reused
++			continue;
++		}
+ 
+-	if ( cl->state >= CS_CONNECTED && cl->lastPacketTime < droppoint ) {
+-		// wait several frames so a debugger session doesn't cause a timeout
+-		if ( ++cl->timeoutCount > 5 ) {
+-			SV_DropClient( cl, "timed out" );
+-			cl->state = CS_FREE; // don't bother with zombie state
++		if ( cl->state >= CS_CONNECTED && cl->lastPacketTime < droppoint ) {
++			// wait several frames so a debugger session doesn't cause a timeout
++			if ( ++cl->timeoutCount > 5 ) {
++				SV_DropClient( cl, "timed out" );
++				cl->state = CS_FREE; // don't bother with zombie state
++			}
+ 		}
++		else
++			cl->timeoutCount = 0;
+ 	}
+-	else
+-		cl->timeoutCount = 0;
+ }
+ 
+ /*
+diff --git a/code/client/cl_main.cpp b/code/client/cl_main.cpp
+--- a/code/client/cl_main.cpp
++++ b/code/client/cl_main.cpp
+@@ -810,6 +810,18 @@
+ 		s = MSG_ReadString( msg );
+ 		UI_UpdateConnectionMessageString( s );
+ 		Com_Printf( "%s", s );
++		// E3: if we are still trying to connect and this print came from the
++		// server we are dialling, it is a rejection ("Server is full.",
++		// "Server uses protocol version N.", etc). Stock behaviour only printed
++		// it to the console and kept resending the connect request, so the
++		// player just sat on the loading screen forever with no on-screen
++		// reason. Treat it as a connection failure: stop retrying and surface
++		// the server's message on the menu (ERR_DISCONNECT drops to the main
++		// menu showing com_errorMessage).
++		if ( ( cls.state == CA_CONNECTING || cls.state == CA_CHALLENGING )
++			&& NET_CompareAdr( from, clc.serverAddress ) ) {
++			Com_Error( ERR_DISCONNECT, "%s", s );
++		}
+ 		return;
+ 	}
+ 

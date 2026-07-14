@@ -1,0 +1,35 @@
+// jedi-outcast-rebuild co-op UI overlay — menu load list.
+//
+// This shadows the stock ui/menus.txt (this pk3 sorts after assets5). It lists
+// the same retail menu FILES by path so the normal UI is unchanged — the .menu
+// files themselves stay in the retail pk3s and are never redistributed here —
+// and adds our own ui/coop.menu (original authorship, shipped in this pk3).
+{
+	loadMenu { "ui/main.menu"							}
+	loadMenu { "ui/newgame.menu"						}
+	loadMenu { "ui/loadgame.menu"						}
+	loadMenu { "ui/controls.menu"						}
+	loadMenu { "ui/setup.menu"							}
+	loadMenu { "ui/credits.menu"						}
+	loadMenu { "ui/quit.menu"							}
+
+	loadMenu { "ui/ingame.menu"							}
+	loadMenu { "ui/ingamesave.menu"						}
+	loadMenu { "ui/ingameload.menu"						}
+	loadMenu { "ui/ingamecontrols.menu"					}
+	loadMenu { "ui/ingamesetup.menu"					}
+	loadMenu { "ui/ingamequit.menu"						}
+
+	loadMenu { "ui/datapadforcepowers.menu"				}
+	loadMenu { "ui/datapadinventory.menu"				}
+	loadMenu { "ui/datapadmission.menu"					}
+	loadMenu { "ui/datapadweapons.menu"					}
+
+	loadMenu { "ui/error.menu"							}
+	loadMenu { "ui/vid_warning.menu"					}
+	loadMenu { "ui/ingamevid_warning.menu"				}
+	loadMenu { "ui/videodriver.menu"					}
+
+	// Our co-op page.
+	loadMenu { "ui/coop.menu"							}
+}

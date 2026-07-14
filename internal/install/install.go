@@ -16,8 +16,17 @@ import (
 
 // Options configures an install run.
 type Options struct {
-	// RepoRoot is the checked-out repository (for tools/ and assets/).
+	// RepoRoot is the checked-out repository, used by the dev flow for the
+	// git-based engine sync. Empty in the standalone-binary flow, which supplies
+	// CoopUIDir and EngineSync instead.
 	RepoRoot string
+	// CoopUIDir holds the co-op UI assets (zz-coop-ui.pk3 and the ui/ tree used to
+	// build it). Defaults to <RepoRoot>/assets/coop-ui when empty.
+	CoopUIDir string
+	// EngineSync, when non-nil, is called to bring the built engine in line with
+	// the graphics config (rebuilding if needed). The standalone flow injects an
+	// embed-backed sync here; when nil, the git-submodule sync (RepoRoot) is used.
+	EngineSync func(context.Context) error
 	// BuildDir is the OpenJK CMake build dir (openjk/build).
 	BuildDir string
 	// GameData overrides Steam autodetection when set (the dir with
@@ -122,9 +131,9 @@ func Install(ctx context.Context, p Platform, opts *Options) error {
 	if !fileExists(gamecode) {
 		return fmt.Errorf("gamecode not built: %s", gamecode)
 	}
-	renderer := filepath.Join(engineDir, p.RendererName)
-	if !fileExists(renderer) {
-		return fmt.Errorf("renderer not built beside engine: %s", renderer)
+	renderer := resolveRenderer(opts.BuildDir, engineDir, p)
+	if renderer == "" {
+		return fmt.Errorf("renderer %s not found under %s (build it per README first)", p.RendererName, opts.BuildDir)
 	}
 	opts.infof("engine: %s", engineBin)
 
@@ -191,9 +200,13 @@ func Install(ctx context.Context, p Platform, opts *Options) error {
 	opts.infof("linked gamecode %s", p.GamecodeName)
 
 	// Build (if needed) + link the co-op UI overlay.
-	coopPak := filepath.Join(opts.RepoRoot, "assets", "coop-ui", "zz-coop-ui.pk3")
+	coopUIDir := opts.CoopUIDir
+	if coopUIDir == "" {
+		coopUIDir = filepath.Join(opts.RepoRoot, "assets", "coop-ui")
+	}
+	coopPak := filepath.Join(coopUIDir, "zz-coop-ui.pk3")
 	if !fileExists(coopPak) {
-		if _, err := paks.BuildCoopUI(filepath.Join(opts.RepoRoot, "assets", "coop-ui"), coopPak); err != nil {
+		if _, err := paks.BuildCoopUI(coopUIDir, coopPak); err != nil {
 			opts.infof("could not build co-op UI overlay: %v", err)
 		}
 	}
@@ -270,6 +283,10 @@ func Uninstall(p Platform, opts *Options) error {
 // features, and rebuilds — the same operation the graphics menu performs. When
 // the built selection already matches, it is a no-op (no reset, no rebuild).
 func ensureEngineMatchesConfig(ctx context.Context, opts *Options) error {
+	// Standalone flow: an injected embed-backed sync owns the extract/patch/build.
+	if opts.EngineSync != nil {
+		return opts.EngineSync(ctx)
+	}
 	if opts.RepoRoot == "" {
 		// No repo (e.g. installing from a prebuilt drop): trust what's built.
 		return nil
@@ -294,6 +311,23 @@ func ensureEngineMatchesConfig(ctx context.Context, opts *Options) error {
 		return err
 	}
 	return gfx.Build(ctx, filepath.Join(opts.RepoRoot, "openjk"), opts.BuildDir, opts.Out)
+}
+
+// resolveRenderer locates the built renderer module, returning "" if not found.
+// The JK2-SP CMake sets RUNTIME_OUTPUT_DIRECTORY (so the engine EXE lands at the
+// build root) but not LIBRARY_OUTPUT_DIRECTORY, so the renderer .so stays in its
+// target subdir (code/rd-vanilla/). Check the subdir first, then fall back to
+// beside the engine (in case a future build flattens the layout).
+func resolveRenderer(buildDir, engineDir string, p Platform) string {
+	for _, cand := range []string{
+		filepath.Join(buildDir, "code", "rd-vanilla", p.RendererName),
+		filepath.Join(engineDir, p.RendererName),
+	} {
+		if fileExists(cand) {
+			return cand
+		}
+	}
+	return ""
 }
 
 // gfxSelectionDiffers reports whether the built feature set (have) differs from

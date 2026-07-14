@@ -1,0 +1,46 @@
+diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
+--- a/codeJK2/game/g_main.cpp
++++ b/codeJK2/game/g_main.cpp
+@@ -826,6 +826,42 @@
+ 	return &globals;
+ }
+ 
++/*
++=================
++GetCGameAPI
++
++Client-side entry point for the dual-load remote client. A serverless
++client loads this same library a second time and calls this instead of
++GetGameAPI: it populates gi from the client-safe import table and runs
++GI_Init (weapon/item parms the cgame needs), but wires no globals export
++table — the client never runs the server-side game entry points.
++=================
++*/
++extern "C" Q_EXPORT void QDECL GetCGameAPI( game_import_t *import ) {
++	gameinfo_import_t	gameinfo_import;
++
++	gi = *import;
++
++	gameinfo_import.FS_FOpenFile = gi.FS_FOpenFile;
++	gameinfo_import.FS_Read = gi.FS_Read;
++	gameinfo_import.FS_FCloseFile = gi.FS_FCloseFile;
++	gameinfo_import.Cvar_Set = gi.cvar_set;
++	gameinfo_import.Cvar_VariableStringBuffer = gi.Cvar_VariableStringBuffer;
++	gameinfo_import.Cvar_Create = G_Cvar_Create;
++
++	GI_Init( &gameinfo_import );
++
++	// The cgame resolves weapons and items against bg_itemlist, which InitGame
++	// fills from ext_data/items.dat. A dual-loaded client never runs InitGame,
++	// so load the item parms here too (client-safe: pure FS read + parse, no
++	// server state). Without this, CG_RegisterWeapon errors with "Couldn't
++	// find item for weapon ... Need to update Items.dat!". G_InitMemory must
++	// run first — the parser allocates strings through G_Alloc, which reads the
++	// g_debugalloc cvar that G_InitMemory registers.
++	G_InitMemory();
++	IT_LoadItemParms();
++}
++
+ void QDECL G_Error( const char *fmt, ... ) {
+ 	va_list		argptr;
+ 	char		text[1024];

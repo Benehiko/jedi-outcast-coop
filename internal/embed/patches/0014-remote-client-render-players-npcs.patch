@@ -1,0 +1,449 @@
+diff --git a/code/client/cl_cgame.cpp b/code/client/cl_cgame.cpp
+index 1896b604..ff28061a 100644
+--- a/code/client/cl_cgame.cpp
++++ b/code/client/cl_cgame.cpp
+@@ -1718,6 +1718,13 @@ void CL_InitCGame( void ) {
+ 	if ( !cgvm.entryPoint ) {
+ 		Com_Printf( "^5dual-load: initialising cgame on remote client\n" );	// A3 probe (temporary)
+ 
++		// M3: tell the dual-loaded cgame it is a serverless remote client. The
++		// cgame reads this cvar in GetCGameAPI (to allocate client structures for
++		// rendering other players/NPCs) and in CG_Init (to set its cg_remoteClient
++		// flag, which the render/HUD guards use instead of "gent->client is null").
++		// The host never enters this branch, so the cvar stays 0 there.
++		Cvar_Set( "cg_remoteClient", "1" );
++
+ 		GetCGameAPIProc *GetCGameAPI = NULL;
+ 		cl_cgame_library = Sys_LoadSPGameDll( "jospgame", (GetGameAPIProc **)&GetCGameAPI );
+ 		// Sys_LoadSPGameDll resolves "GetGameAPI"; we need "GetCGameAPI".
+diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
+index db052304..ab580dd0 100644
+--- a/codeJK2/game/g_main.cpp
++++ b/codeJK2/game/g_main.cpp
+@@ -860,6 +860,30 @@ extern "C" Q_EXPORT void QDECL GetCGameAPI( game_import_t *import ) {
+ 	// g_debugalloc cvar that G_InitMemory registers.
+ 	G_InitMemory();
+ 	IT_LoadItemParms();
++
++	// M3 (remote-client rendering): the dual-loaded cgame renders other players
++	// and NPCs out of g_entities[]/level.clients, which InitGame allocates on the
++	// host. A serverless remote client never runs InitGame, so g_entities[i].client
++	// is null and CG_Player/CG_NewClientinfo early-return, leaving characters
++	// unrendered. When the engine flags us as the remote client, allocate and wire
++	// the client array here, mirroring InitGame's block (client-safe: zeroed
++	// g_entities + one G_Alloc + memset, no server state). The remote client fills
++	// these per-entity from the network in CG_NewClientinfo (players) and the NPC
++	// model path. cg_remoteClient is set by CL_InitCGame's dual-load branch; it is
++	// 0 on the host, so this block is a no-op there and the host keeps its real,
++	// InitGame-allocated clients.
++	if ( gi.cvar( "cg_remoteClient", "0", 0 )->integer )
++	{
++		memset( g_entities, 0, MAX_GENTITIES * sizeof(g_entities[0]) );
++		globals.gentities = g_entities;
++		level.maxclients = MAX_CLIENTS;
++		level.clients = (gclient_t *) G_Alloc( level.maxclients * sizeof(level.clients[0]) );
++		memset( level.clients, 0, level.maxclients * sizeof(level.clients[0]) );
++		for ( int i = 0; i < level.maxclients; i++ )
++		{
++			g_entities[i].client = level.clients + i;
++		}
++	}
+ }
+ 
+ void QDECL G_Error( const char *fmt, ... ) {
+diff --git a/codeJK2/game/g_client.cpp b/codeJK2/game/g_client.cpp
+index e949f3ce..1f9bbc18 100644
+--- a/codeJK2/game/g_client.cpp
++++ b/codeJK2/game/g_client.cpp
+@@ -605,6 +605,14 @@ void ClientUserinfoChanged( int clientNum ) {
+ 	Q_strcat( buf, sizeof( buf ),	  "headModel\\\\" );
+ 	Q_strcat( buf, sizeof( buf ),	  "torsoModel\\\\" );
+ 	Q_strcat( buf, sizeof( buf ),	  "legsModel\\\\" );
++	// M3: network the ghoul2 model name so a serverless remote client can rebuild
++	// this player's model (CG_NewClientinfo -> G_SetG2PlayerModel). Stock SP left
++	// the model keys empty because the local player was always the hardcoded
++	// "kyle" built from the shared gentity; a remote client has no such gentity.
++	// renderInfo.modelName is set by G_SetG2PlayerModel; default to "kyle" until
++	// the model has been built (spawn order).
++	Q_strcat( buf, sizeof( buf ), va( "model\\%s\\",
++		client->renderInfo.modelName[0] ? client->renderInfo.modelName : "kyle" ) );
+ 	Q_strcat( buf, sizeof( buf ), va( "sex\\%s\\", sex ) );
+ 	Q_strcat( buf, sizeof( buf ), va( "hc\\%i\\", client->pers.maxHealth ) );
+ 
+@@ -1426,6 +1434,30 @@ void G_SetG2PlayerModel( gentity_t * const ent, const char *modelName, const cha
+ 		Com_Printf( S_COLOR_RED"couldn't load playerModel %s!\n", va("models/players/%s/model.glm", modelName) );
+ 	}
+ 
++	// M3: persist the ghoul2 model name so ClientUserinfoChanged can network it in
++	// the CS_PLAYERS configstring. A serverless remote client reads it back in
++	// CG_NewClientinfo and rebuilds the same ghoul2 to render this player. The
++	// field renderInfo.modelName is otherwise unused. modelName may have been
++	// reassigned to "stormtrooper" above if the requested model failed to load.
++	if ( ent->client )
++	{
++		Q_strncpyz( ent->client->renderInfo.modelName, modelName,
++			sizeof( ent->client->renderInfo.modelName ) );
++	}
++
++	// M3: NPCs have no CS_PLAYERS slot, so network their glm model through
++	// s.modelindex — an entityState field that is otherwise 0 for a player-type
++	// entity. It resolves to a CS_MODELS configstring the remote client reads
++	// (CG_ConfigString(CS_MODELS+modelindex)) to rebuild the same ghoul2,
++	// mirroring how MP carries NPC models. Gate on entity number, NOT EF_NPC:
++	// this builder runs during the NPC stats parse (NPC_stats.cpp) BEFORE the
++	// spawn code sets EF_NPC (NPC_spawn.cpp:956), so EF_NPC is not yet set here.
++	// Slots [0,MAX_CLIENTS) are reserved for real player clients (their model
++	// rides in CS_PLAYERS); everything G_Spawn'd at >= MAX_CLIENTS is an NPC.
++	if ( ent->s.number >= MAX_CLIENTS )
++	{
++		ent->s.modelindex = G_ModelIndex( va( "models/players/%s/model.glm", modelName ) );
++	}
+ }
+ /*
+ Ghoul2 Insert End
+diff --git a/codeJK2/cgame/cg_main.cpp b/codeJK2/cgame/cg_main.cpp
+index 01b31e0c..ce5a9a84 100644
+--- a/codeJK2/cgame/cg_main.cpp
++++ b/codeJK2/cgame/cg_main.cpp
+@@ -219,6 +219,13 @@ Ghoul2 Insert End
+ 
+ cg_t				cg;
+ cgs_t				cgs;
++// M3: true when this cgame runs on a serverless remote client (dual-loaded, no
++// local server gentities). Set from the cg_remoteClient cvar in CG_Init. The
++// render/HUD guards use this instead of "the local player's gent->client is
++// null" as the remote-client sentinel, because M3 allocates those client
++// structures on the remote client (so client-nullness no longer distinguishes
++// host from remote).
++qboolean			cg_remoteClient = qfalse;
+ centity_t			cg_entities[MAX_GENTITIES];
+ weaponInfo_t		cg_weapons[MAX_WEAPONS];
+ itemInfo_t			cg_items[MAX_ITEMS];
+@@ -241,6 +248,7 @@ vmCvar_t	cg_bobpitch;
+ vmCvar_t	cg_bobroll;
+ vmCvar_t	cg_swingSpeed;
+ vmCvar_t	cg_shadows;
++vmCvar_t	cg_remoteClientCvar;	// M3: mirrors the engine's cg_remoteClient cvar
+ vmCvar_t	cg_paused;
+ vmCvar_t	cg_drawTimer;
+ vmCvar_t	cg_drawFPS;
+@@ -438,6 +446,9 @@ Ghoul2 Insert End
+ 	{ &cg_smoothPlayerPos, "cg_smoothPlayerPos", "0.5", 0},
+ 	{ &cg_smoothPlayerPlat, "cg_smoothPlayerPlat", "0.75", 0},
+ 	{ &cg_smoothPlayerPlatAccel, "cg_smoothPlayerPlatAccel", "3.25", 0},
++	// M3: set to 1 by CL_InitCGame's dual-load branch on the serverless remote
++	// client; 0 on the host. Read once in CG_Init into the cg_remoteClient flag.
++	{ &cg_remoteClientCvar, "cg_remoteClient", "0", CVAR_ROM },
+ };
+ 
+ static const size_t cvarTableSize = ARRAY_LEN( cvarTable );
+@@ -1725,6 +1736,11 @@ Ghoul2 Insert End
+ 
+ 	CG_RegisterCvars();
+ 
++	// M3: latch the remote-client flag from the cvar the engine set in the
++	// dual-load branch. Guards downstream use cg_remoteClient (not client-pointer
++	// nullness) to tell host from serverless remote client.
++	cg_remoteClient = (qboolean)( cg_remoteClientCvar.integer != 0 );
++
+ //moved from CG_GameStateReceived because it's loaded sooner now
+ 	CG_InitLocalEntities();
+ 
+diff --git a/codeJK2/cgame/cg_local.h b/codeJK2/cgame/cg_local.h
+index 67946c5d..ad8475e4 100644
+--- a/codeJK2/cgame/cg_local.h
++++ b/codeJK2/cgame/cg_local.h
+@@ -540,12 +540,16 @@ typedef struct
+ 
+ 
+ extern	cg_t			cg;
++// M3: true on a serverless remote client (dual-loaded cgame, no local server).
++// The render/HUD guards use this instead of client-pointer nullness.
++extern	qboolean		cg_remoteClient;
+ extern	centity_t		cg_entities[MAX_GENTITIES];
+ extern	weaponInfo_t	cg_weapons[MAX_WEAPONS];
+ extern	itemInfo_t		cg_items[MAX_ITEMS];
+ extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
+ 
+ 
++extern	vmCvar_t		cg_remoteClientCvar;	// M3: mirrors engine cg_remoteClient
+ extern	vmCvar_t		cg_centertime;
+ extern	vmCvar_t		cg_runpitch;
+ extern	vmCvar_t		cg_runroll;
+diff --git a/codeJK2/cgame/cg_players.cpp b/codeJK2/cgame/cg_players.cpp
+index ef21d32f..fc41fed4 100644
+--- a/codeJK2/cgame/cg_players.cpp
++++ b/codeJK2/cgame/cg_players.cpp
+@@ -476,6 +476,106 @@ void CG_NewClientinfo( int clientNum )
+ 							);
+ 
+ 	ci->infoValid = qfalse;
++
++	// M3: on a serverless remote client, build this player's ghoul2 model from the
++	// networked model name so CG_Player can render it. On the host the model was
++	// already built at spawn (G_SetG2PlayerModel from ClientUserinfoChanged's
++	// caller), so skip — cg_remoteClient is false there. Build once: skip if this
++	// gentity already has a valid ghoul2 (re-sent configstrings must not rebuild).
++	if ( cg_remoteClient )
++	{
++		gentity_t *pent = &g_entities[clientNum];
++		if ( pent->client && !pent->ghoul2.IsValid() )
++		{
++			extern void G_SetG2PlayerModel( gentity_t * const ent, const char *modelName,
++				const char *customSkin, const char *surfOff, const char *surfOn );
++			const char *model = Info_ValueForKey( configstring, "model" );
++			if ( !model[0] )
++			{
++				model = "kyle";
++			}
++			G_SetG2PlayerModel( pent, model, NULL, NULL, NULL );
++			// G_SetG2PlayerModelInfo (called inside) sets infoValid = qtrue when the
++			// ghoul2 built; leave it so CG_Player's ci->infoValid gate passes.
++		}
++	}
++}
++
++/*
++======================
++CG_RemoteNPCModel
++
++M3: on a serverless remote client, an NPC entity (ET_PLAYER + EF_NPC, index
++>= MAX_CLIENTS) arrives with no server gentity client and no ghoul2 — the host
++built those at spawn, which we never ran. Allocate a client for its gentity and
++rebuild the same ghoul2 from the model name networked in s.modelindex (a
++CS_MODELS entry of the form "models/players/<name>/model.glm"), so CG_Player can
++render the NPC exactly like the host does. Idempotent: does nothing once the
++gentity has a client with a valid ghoul2. No-op on the host (cg_remoteClient
++false) and for real player clients (handled by CG_NewClientinfo).
++======================
++*/
++static void CG_RemoteNPCModel( centity_t *cent )
++{
++	if ( !cg_remoteClient )
++	{
++		return;
++	}
++	if ( !( cent->currentState.eFlags & EF_NPC ) )
++	{
++		return;
++	}
++	gentity_t *nent = cent->gent;
++	if ( !nent || nent->ghoul2.IsValid() )
++	{
++		return;		// already built (or no gentity slot)
++	}
++
++	// The glm path was registered at spawn via G_ModelIndex and rides in
++	// s.modelindex; resolve it back to the configstring path.
++	const int modelIndex = cent->currentState.modelindex;
++	if ( modelIndex <= 0 )
++	{
++		return;		// not a ghoul2-model NPC (or model not networked)
++	}
++	const char *glmPath = CG_ConfigString( CS_MODELS + modelIndex );
++	if ( !glmPath || !glmPath[0] )
++	{
++		return;
++	}
++
++	// Extract "<name>" from "models/players/<name>/model.glm".
++	char modelName[MAX_QPATH] = {0};
++	const char *p = strstr( glmPath, "models/players/" );
++	if ( p )
++	{
++		p += strlen( "models/players/" );
++		const char *slash = strchr( p, '/' );
++		if ( slash && (size_t)(slash - p) < sizeof( modelName ) )
++		{
++			Q_strncpyz( modelName, p, (slash - p) + 1 );
++		}
++	}
++	if ( !modelName[0] )
++	{
++		return;
++	}
++
++	// Allocate a client for the NPC gentity, mirroring the host's NPC spawn
++	// (NPC_spawn.cpp G_Alloc(sizeof(gclient_t))), then build the ghoul2.
++	if ( !nent->client )
++	{
++		nent->client = (gclient_t *)G_Alloc( sizeof( gclient_t ) );
++		if ( !nent->client )
++		{
++			return;
++		}
++		memset( nent->client, 0, sizeof( gclient_t ) );
++	}
++
++	extern void G_SetG2PlayerModel( gentity_t * const ent, const char *modelName,
++		const char *customSkin, const char *surfOff, const char *surfOn );
++	G_SetG2PlayerModel( nent, modelName, NULL, NULL, NULL );
+ }
+ 
+ /*
+@@ -1036,7 +1136,13 @@ void CG_PlayerAnimation( centity_t *cent, int *legsOld, int *legs, float *legsBa
+ 
+ 	ci = &cent->gent->client->clientInfo;
+ 	//Changed this from cent->currentState.legsAnim to cent->gent->client->ps.legsAnim because it was screwing up our timers when we've just changed anims while turning
+-	legsAnim = cent->gent->client->ps.legsAnim;
++	// M3: on a serverless remote client the gentity playerState is not populated
++	// (no local server sim), so gent->client->ps.legsAnim is 0. The per-entity
++	// snapshot carries legsAnim/torsoAnim, so drive the skeleton from
++	// cent->currentState there. renderInfo.legsFpsMod (a server tuning value) is
++	// likewise absent — use the neutral 1.0. The host keeps its playerState path.
++	const float legsFpsMod = cg_remoteClient ? 1.0f : cent->gent->client->renderInfo.legsFpsMod;
++	legsAnim = cg_remoteClient ? cent->currentState.legsAnim : cent->gent->client->ps.legsAnim;
+ 
+ 	// do the shuffle turn frames locally (MAN this is an Fugly-ass hack!)
+ 
+@@ -1047,7 +1153,7 @@ void CG_PlayerAnimation( centity_t *cent, int *legsOld, int *legs, float *legsBa
+ 
+ 	if ( legsTurnAnim != -1 )
+ 	{
+-		newLegsFrame = CG_RunLerpFrame( ci, &cent->pe.legs, legsTurnAnim, cent->gent->client->renderInfo.legsFpsMod, cent->gent->s.number );
++		newLegsFrame = CG_RunLerpFrame( ci, &cent->pe.legs, legsTurnAnim, legsFpsMod, cent->gent->s.number );
+ 		//This line doesn't seem to serve any useful purpose, rather it
+ 		//breaks things since any task waiting for a lower anim to complete
+ 		//never will finish if this happens!!!
+@@ -1055,7 +1161,7 @@ void CG_PlayerAnimation( centity_t *cent, int *legsOld, int *legs, float *legsBa
+ 	}
+ 	else
+ 	{
+-		newLegsFrame = CG_RunLerpFrame( ci, &cent->pe.legs, legsAnim, cent->gent->client->renderInfo.legsFpsMod, cent->gent->s.number);
++		newLegsFrame = CG_RunLerpFrame( ci, &cent->pe.legs, legsAnim, legsFpsMod, cent->gent->s.number);
+ 	}
+ 
+ 	*legsOld = cent->pe.legs.oldFrame;
+@@ -1070,7 +1176,11 @@ void CG_PlayerAnimation( centity_t *cent, int *legsOld, int *legs, float *legsBa
+ 		}
+ 	}
+ 
+-	newTorsoFrame = CG_RunLerpFrame( ci, &cent->pe.torso, cent->gent->client->ps.torsoAnim, cent->gent->client->renderInfo.torsoFpsMod, cent->gent->s.number );
++	// M3: like legsAnim above, the remote client has no gentity playerState, so
++	// take torsoAnim from the networked snapshot and a neutral fps mod.
++	const int torsoAnim = cg_remoteClient ? cent->currentState.torsoAnim : cent->gent->client->ps.torsoAnim;
++	const float torsoFpsMod = cg_remoteClient ? 1.0f : cent->gent->client->renderInfo.torsoFpsMod;
++	newTorsoFrame = CG_RunLerpFrame( ci, &cent->pe.torso, torsoAnim, torsoFpsMod, cent->gent->s.number );
+ 
+ 	*torsoOld = cent->pe.torso.oldFrame;
+ 	*torso = cent->pe.torso.frame;
+@@ -4798,6 +4908,10 @@ void CG_Player( centity_t *cent ) {
+ 		return;
+ 	}
+ 
++	// M3: on the remote client, build an NPC's client + ghoul2 on first sight
++	// (players are handled in CG_NewClientinfo). No-op on the host and once built.
++	CG_RemoteNPCModel( cent );
++
+ 	if(!cent->gent->client)
+ 	{
+ 		return;
+diff --git a/codeJK2/cgame/cg_view.cpp b/codeJK2/cgame/cg_view.cpp
+index aa00b16e..bdf53c7b 100644
+--- a/codeJK2/cgame/cg_view.cpp
++++ b/codeJK2/cgame/cg_view.cpp
+@@ -1862,15 +1862,15 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView ) {
+ 
+ 	// let the client system know what our weapon and zoom settings are
+ 	//FIXME: should really send forcePowersActive over network onto cg.snap->ps...
+-	// dual-load: on a serverless remote client g_entities[0].client is null
+-	// (no local server spawned the player), so cg_entities[0].gent->client
+-	// faults. The values we need for the local player are all in the received
+-	// snapshot playerstate; fall back to cg.snap->ps when the gent path is not
+-	// available. The host keeps its real gentity path.
++	// dual-load: on a serverless remote client the local player's gentity is not
++	// backed by a real server playerstate (M3 allocates the client struct but it
++	// stays zeroed for the local player, whose true ps arrives in the snapshot).
++	// Use cg_remoteClient — not client-pointer nullness, which M3 made non-null —
++	// to take the snapshot path. The host keeps its real gentity path.
+ 	const gentity_t	*localGent = cg_entities[0].gent;
+-	const qboolean	haveLocalClient = (qboolean)( localGent && localGent->client );
++	const qboolean	haveLocalClient = (qboolean)( !cg_remoteClient && localGent && localGent->client );
+ 	const int		localForcePowers = haveLocalClient ? localGent->client->ps.forcePowersActive : cg.snap->ps.forcePowersActive;
+-	const int		localEFlags = localGent ? localGent->s.eFlags : cg.snap->ps.eFlags;
++	const int		localEFlags = ( !cg_remoteClient && localGent ) ? localGent->s.eFlags : cg.snap->ps.eFlags;
+ 
+ 	float speed = cg.refdef.fov_y / 75.0 * ((localForcePowers&(1<<FP_SPEED))?1.0f:Q_min(cg_timescale.value, 1.0f));
+ 
+diff --git a/codeJK2/cgame/cg_draw.cpp b/codeJK2/cgame/cg_draw.cpp
+index 9537dd08..a35ca0f5 100644
+--- a/codeJK2/cgame/cg_draw.cpp
++++ b/codeJK2/cgame/cg_draw.cpp
+@@ -290,7 +290,7 @@ static void CG_DrawForcePower(centity_t *cent,int x,int y)
+ 	// the local player; the same force-power fields live in the received
+ 	// snapshot playerstate. Use the gent's ps when present (host), else the
+ 	// snapshot's (remote client).
+-	const playerState_t	*ps = ( cent->gent && cent->gent->client ) ? &cent->gent->client->ps : &cg.snap->ps;
++	const playerState_t	*ps = ( !cg_remoteClient && cent->gent && cent->gent->client ) ? &cent->gent->client->ps : &cg.snap->ps;
+ 
+ 	if ( !ps->forcePowersKnown )
+ 	{
+@@ -371,7 +371,7 @@ static void CG_DrawAmmo(centity_t	*cent,int x,int y)
+ 	{
+ 		cgi_R_SetColor( colorTable[CT_WHITE] );
+ 
+-		if ( !cg.saberAnimLevelPending && cent->gent->client )
++		if ( !cg.saberAnimLevelPending && !cg_remoteClient && cent->gent->client )
+ 		{//uninitialized after a loadgame, cheat across and get it
+ 			cg.saberAnimLevelPending = cent->gent->client->ps.saberAnimLevel;
+ 		}
+@@ -793,7 +793,7 @@ static void CG_DrawHUD( centity_t *cent )
+ //				value = cg.snap->ps.ammo[weaponData[cent->currentState.weapon].ammoIndex];
+ 			}
+ //			CG_DrawSmallStringColor(x, y - 60,va("Ammo:%d",value), colorTable[CT_HUD_GREEN] );
+-			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",( cent->gent && cent->gent->client ) ? cent->gent->client->ps.forcePower : cg.snap->ps.forcePower), colorTable[CT_HUD_GREEN] );
++			CG_DrawSmallStringColor(x, y - 40,va("Force:%d",( !cg_remoteClient && cent->gent && cent->gent->client ) ? cent->gent->client->ps.forcePower : cg.snap->ps.forcePower), colorTable[CT_HUD_GREEN] );
+ 		}
+ 
+ 		CG_DrawHUDRightFrame1(x,y);
+@@ -1701,7 +1701,11 @@ static void CG_ScanForCrosshairEntity( qboolean scanAll )
+ 	//FIXME: debounce this to about 10fps?
+ 
+ 	cg_forceCrosshair = qfalse;
+-	if ( cg_entities[0].gent && cg_entities[0].gent->client ) // <-Mike said it should always do this   //if (cg_crosshairForceHint.integer &&
++	// dual-load: this force-crosshair hint traces from g_entities[0]'s server
++	// renderInfo.eyePoint, which is empty for the local player on a remote client
++	// (M3 allocates the client but leaves it zeroed). Gate on !cg_remoteClient so
++	// the remote client skips the hint rather than trace from a zero eyePoint.
++	if ( !cg_remoteClient && cg_entities[0].gent && cg_entities[0].gent->client ) // <-Mike said it should always do this   //if (cg_crosshairForceHint.integer &&
+ 	{//try to check for force-affectable stuff first
+ 		vec3_t d_f, d_rt, d_up;
+ 
+@@ -1793,10 +1797,11 @@ static void CG_ScanForCrosshairEntity( qboolean scanAll )
+ 	{
+ 		// dual-load: the "100% accurate" path traces from the local player's
+ 		// gentity (g_entities[0].client->renderInfo, CalcMuzzlePoint) — server
+-		// state that is null on a serverless remote client, whose local player
+-		// has no gentity. Fall through to the view-origin path below, which is
+-		// snapshot-derived and valid on both host and remote client.
+-		if ( cg_dynamicCrosshair.integer && g_entities[0].client )
++		// state that is not meaningfully populated on a serverless remote client
++		// (M3 allocates the client struct but it stays zeroed for the local
++		// player). Gate on !cg_remoteClient so the remote client falls through to
++		// the view-origin path below, which is snapshot-derived and valid on both.
++		if ( cg_dynamicCrosshair.integer && !cg_remoteClient && g_entities[0].client )
+ 		{//100% accurate
+ 			vec3_t d_f, d_rt, d_up;
+ 			if ( cg.snap->ps.weapon == WP_NONE ||
+diff --git a/codeJK2/cgame/cg_weapons.cpp b/codeJK2/cgame/cg_weapons.cpp
+index 88df39c9..8f3ec9ee 100644
+--- a/codeJK2/cgame/cg_weapons.cpp
++++ b/codeJK2/cgame/cg_weapons.cpp
+@@ -922,11 +922,12 @@ void CG_AddViewWeapon( playerState_t *ps )
+ 	// dual-load: the first-person view weapon is rendered almost entirely from
+ 	// the local player's server gentity (cent->gent->client->renderInfo, the
+ 	// ghoul2 model, lowerLumbarBone, force-power state). On a serverless remote
+-	// client g_entities[ps->clientNum].client is null, so none of that exists
+-	// yet. Skip the viewmodel this frame rather than fault; the world still
+-	// renders. A snapshot-backed viewmodel is future work. The host keeps its
+-	// real gent path.
+-	if ( !cent->gent || !cent->gent->client )
++	// client that gentity state is not populated for the local player (M3
++	// allocates the client struct but the local player's ghoul2/renderInfo stay
++	// empty). Skip the viewmodel rather than fault; the world still renders. A
++	// snapshot-backed local viewmodel is future work. Gate on cg_remoteClient,
++	// not client-pointer nullness (M3 made it non-null). The host keeps its path.
++	if ( cg_remoteClient || !cent->gent || !cent->gent->client )
+ 	{
+ 		return;
+ 	}

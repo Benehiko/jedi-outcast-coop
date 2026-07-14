@@ -1,0 +1,194 @@
+diff --git a/code/qcommon/qcommon.h b/code/qcommon/qcommon.h
+--- a/code/qcommon/qcommon.h
++++ b/code/qcommon/qcommon.h
+@@ -200,7 +200,11 @@
+ ==============================================================
+ */
+ 
+-#define	PROTOCOL_VERSION	40
++// E2: bumped from 40 when MAX_CLIENTS grew past 1 (co-op raises it to 4).
++// CS_LIGHT_STYLES = CS_PLAYERS + MAX_CLIENTS renumbers every later configstring,
++// so a mismatched (stock 1-client) build must be rejected at connect rather than
++// left to silently desync.
++#define	PROTOCOL_VERSION	41
+ 
+ #define	PORT_SERVER			27960
+ 
+diff --git a/code/qcommon/common.cpp b/code/qcommon/common.cpp
+--- a/code/qcommon/common.cpp
++++ b/code/qcommon/common.cpp
+@@ -1188,7 +1188,13 @@
+ 
+ 		Sys_SetProcessorAffinity();
+ 
+-		Netchan_Init( Com_Milliseconds() & 0xffff );	// pick a port value that should be nice and random
++		// E3: seed net_qport with the process id, not just Com_Milliseconds().
++		// Com_Milliseconds() is ~0 this early in startup, so clients launched
++		// together (loopback co-op) all seeded near-identical qports and the
++		// server reconnected joiner 2/3 into joiner 1's slot -- only one ever
++		// entered the world. The pid is distinct per process, so same-host
++		// clients now get distinct qports.
++		Netchan_Init( ( Com_Milliseconds() ^ Sys_GetProcessId() ) & 0xffff );	// pick a port value that should be nice and random
+ //	VM_Init();
+ 		SV_Init();
+ 
+diff --git a/code/server/server.h b/code/server/server.h
+--- a/code/server/server.h
++++ b/code/server/server.h
+@@ -167,6 +167,7 @@
+ extern	cvar_t	*sv_killserver;
+ extern	cvar_t	*sv_mapname;
+ extern	cvar_t	*sv_hostname;			// D2: LAN co-op browser name
++extern	cvar_t	*sv_maxclients;			// E1: connection limit (<= MAX_CLIENTS)
+ extern	cvar_t	*sv_spawntarget;
+ extern	cvar_t	*sv_mapChecksum;
+ extern	cvar_t	*sv_serverid;
+diff --git a/code/server/sv_main.cpp b/code/server/sv_main.cpp
+--- a/code/server/sv_main.cpp
++++ b/code/server/sv_main.cpp
+@@ -46,6 +46,7 @@
+ cvar_t	*sv_killserver;			// menu system can set to 1 to shut server down
+ cvar_t	*sv_mapname;
+ cvar_t	*sv_hostname;			// D2: name shown in the LAN co-op browser
++cvar_t	*sv_maxclients;			// E1: how many players may connect (<= MAX_CLIENTS)
+ cvar_t	*sv_spawntarget;
+ cvar_t	*sv_mapChecksum;
+ cvar_t	*sv_serverid;
+@@ -246,7 +247,8 @@
+ 	Info_SetValueForKey( infostring, "hostname", sv_hostname->string );
+ 	Info_SetValueForKey( infostring, "mapname", sv_mapname->string );
+ 	Info_SetValueForKey( infostring, "clients", va("%i", count) );
+-	Info_SetValueForKey( infostring, "sv_maxclients", va("%i", MAX_CLIENTS) );
++	Info_SetValueForKey( infostring, "sv_maxclients",
++		va("%i", sv_maxclients ? sv_maxclients->integer : MAX_CLIENTS) );
+ 
+ 	NET_OutOfBandPrint( NS_SERVER, from, "infoResponse\n%s", infostring );
+ }
+diff --git a/code/server/sv_init.cpp b/code/server/sv_init.cpp
+--- a/code/server/sv_init.cpp
++++ b/code/server/sv_init.cpp
+@@ -395,6 +395,11 @@
+ 	// D2: name shown in the LAN co-op browser. Default to the player's name so a
+ 	// freshly hosted game is identifiable without any configuration.
+ 	sv_hostname = Cvar_Get ("sv_hostname", Cvar_VariableString("name"), CVAR_ARCHIVE);
++	// E1: how many players may connect. Latched (fixed for the life of a running
++	// server) and clamped to [1, MAX_CLIENTS]; allocations stay MAX_CLIENTS-sized,
++	// only the connection-accept loop is bounded by this. Default 2 (co-op pair);
++	// coop_host raises it via D1's stored maxplayers.
++	sv_maxclients = Cvar_Get ("sv_maxclients", "2", CVAR_SERVERINFO | CVAR_LATCH | CVAR_ARCHIVE);
+ 
+ 	// systeminfo
+ 	Cvar_Get ("helpUsObi", "0", CVAR_SYSTEMINFO );
+diff --git a/code/server/sv_client.cpp b/code/server/sv_client.cpp
+--- a/code/server/sv_client.cpp
++++ b/code/server/sv_client.cpp
+@@ -80,15 +80,31 @@
+ 	newcl = &temp;
+ 	memset (newcl, 0, sizeof(client_t));
+ 
++	// E1: only accept up to sv_maxclients connections. Client slots stay
++	// MAX_CLIENTS-sized (allocations unchanged); we just stop handing them out
++	// past the configured limit, so "Server is full" fires at the right count.
++	// Declared before the reuse-slot loop's `goto gotnewcl` so no jump skips it.
++	int maxConnect = sv_maxclients ? sv_maxclients->integer : MAX_CLIENTS;
++	if ( maxConnect < 1 ) maxConnect = 1;
++	if ( maxConnect > MAX_CLIENTS ) maxConnect = MAX_CLIENTS;
++
+ 	// if there is already a slot for this ip, reuse it
+ 	for (i=0,cl=svs.clients ; i < MAX_CLIENTS ; i++,cl++)
+ 	{
+ 		if ( cl->state == CS_FREE ) {
+ 			continue;
+ 		}
++		// E3: match an existing slot for reuse by qport ONLY, not by the
++		// source UDP port. The stock `|| from.port == remoteAddress.port`
++		// clause exists for NAT routers that rewrite ports, but qport already
++		// covers that (see SV_PacketEvent, which differentiates same-IP clients
++		// purely by qport). On loopback all co-op clients share 127.0.0.1 and
++		// the OS readily hands out a source port equal to an existing client's,
++		// so the port clause spuriously reconnects joiner 2/3 into joiner 1's
++		// slot -- only one ever enters the world. Matching on qport alone gives
++		// each same-IP client its own slot.
+ 		if ( NET_CompareBaseAdr( from, cl->netchan.remoteAddress )
+-			&& ( cl->netchan.qport == qport
+-			|| from.port == cl->netchan.remoteAddress.port ) )
++			&& cl->netchan.qport == qport )
+ 		{
+ 			if (( sv.time - cl->lastConnectTime)
+ 				< (sv_reconnectlimit->integer * 1000))
+@@ -104,7 +120,7 @@
+ 
+ 
+ 	newcl = NULL;
+-	for ( i = 0; i < MAX_CLIENTS ; i++ ) {
++	for ( i = 0; i < maxConnect ; i++ ) {
+ 		cl = &svs.clients[i];
+ 		if (cl->state == CS_FREE) {
+ 			newcl = cl;
+diff --git a/code/server/sv_ccmds.cpp b/code/server/sv_ccmds.cpp
+--- a/code/server/sv_ccmds.cpp
++++ b/code/server/sv_ccmds.cpp
+@@ -501,6 +501,17 @@
+ 		sv_coopMaxPlayers = atoi( Cmd_Argv( 1 ) );
+ 	}
+ 
++	// E1: raise the player limit to the requested count (clamped to MAX_CLIENTS).
++	// sv_maxclients is CVAR_LATCH; re-Cvar_Get after Cvar_Set applies the latched
++	// value so it takes effect for this running server without a map restart.
++	if ( sv_coopMaxPlayers > 0 ) {
++		int want = sv_coopMaxPlayers;
++		if ( want < 1 ) want = 1;
++		if ( want > MAX_CLIENTS ) want = MAX_CLIENTS;
++		Cvar_Set( "sv_maxclients", va( "%i", want ) );
++		sv_maxclients = Cvar_Get( "sv_maxclients", "2", CVAR_SERVERINFO | CVAR_LATCH | CVAR_ARCHIVE );
++	}
++
+ 	// Enable networking and (re)bind the socket for the current cvars. net_enabled
+ 	// is CVAR_LATCH; NET_Restart re-reads it so this takes effect immediately.
+ 	Cvar_Set( "net_enabled", "1" );
+diff --git a/shared/sys/sys_public.h b/shared/sys/sys_public.h
+--- a/shared/sys/sys_public.h
++++ b/shared/sys/sys_public.h
+@@ -156,6 +156,12 @@
+ 
+ void Sys_SetProcessorAffinity( void );
+ 
++// E3: os process id, used to seed net_qport so simultaneously-launched clients
++// on the same host get distinct qports (Com_Milliseconds is ~0 at startup and
++// collides across processes that boot together -- multiple loopback co-op
++// clients then reconnect into one server slot).
++int Sys_GetProcessId( void );
++
+ typedef enum graphicsApi_e
+ {
+ 	GRAPHICS_API_GENERIC,
+diff --git a/shared/sys/sys_unix.cpp b/shared/sys/sys_unix.cpp
+--- a/shared/sys/sys_unix.cpp
++++ b/shared/sys/sys_unix.cpp
+@@ -561,6 +561,11 @@
+ #endif
+ }
+ 
++// E3: distinct per-process value used to seed net_qport (see sys_public.h).
++int Sys_GetProcessId( void ) {
++	return (int)getpid();
++}
++
+ UnpackDLLResult Sys_UnpackDLL(const char *name)
+ {
+ 	return UnpackDLLResult();
+diff --git a/shared/sys/sys_win32.cpp b/shared/sys/sys_win32.cpp
+--- a/shared/sys/sys_win32.cpp
++++ b/shared/sys/sys_win32.cpp
+@@ -219,6 +219,11 @@
+ 		Com_DPrintf( "Setting affinity mask failed (%s)\n", GetErrorString( GetLastError() ) );
+ }
+ 
++// E3: distinct per-process value used to seed net_qport (see sys_public.h).
++int Sys_GetProcessId( void ) {
++	return (int)GetCurrentProcessId();
++}
++
+ /*
+ ==================
+ Sys_LowPhysicalMemory()
