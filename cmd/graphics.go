@@ -1,11 +1,38 @@
 package cmd
 
 import (
+	"fmt"
+	"path/filepath"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/config"
+	"github.com/Benehiko/jedi-outcast-coop/internal/gfxprobe"
+	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
 )
+
+// msaaLevels mirrors the sample counts offered by the MSAA row, ascending. Used
+// by the write-time probe to fall back to the highest level the GPU/driver can
+// actually realise.
+var msaaLevels = []int{2, 4, 8, 16}
+
+// msaaLabel renders a sample count the way the MSAA row does ("off", "8x").
+func msaaLabel(n int) string {
+	if n <= 0 {
+		return "off"
+	}
+	return fmt.Sprintf("%dx", n)
+}
+
+// resolveBuildDir mirrors the launch/install default: an explicit --build wins,
+// else $JK2_BUILD, else <repo>/openjk/build.
+func resolveBuildDir(root, buildDir string) string {
+	if buildDir != "" {
+		return buildDir
+	}
+	return install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
+}
 
 func newGraphicsCmd() *cobra.Command {
 	var repo, buildDir string
@@ -48,8 +75,12 @@ func newGraphicsCmd() *cobra.Command {
 				config.NewEnumRow("MSAA",
 					"Multisample anti-aliasing. Higher is smoother edges, more GPU cost.",
 					false, &cfg.Graphics.MSAA,
-					[]int{0, 2, 4, 8, 16},
+					append([]int{0}, msaaLevels...),
 					map[int]string{0: "off", 2: "2x", 4: "4x", 8: "8x", 16: "16x"}),
+				config.NewBoolRow("Fullscreen",
+					"Run fullscreen. Off = windowed, the reliable choice on Wayland "+
+						"where fullscreen mode enumeration is flaky.",
+					false, &cfg.Graphics.Fullscreen),
 				config.NewBoolRow("Texture upscale",
 					"Real-ESRGAN hi-res override built from your retail textures (GPU + container).",
 					false, &cfg.Graphics.TextureUpscale),
@@ -72,6 +103,23 @@ func newGraphicsCmd() *cobra.Command {
 			}
 			// Copy the resolution the row edited back into the config before saving.
 			cfg.Graphics.ResWidth, cfg.Graphics.ResHeight = resSel.W, resSel.H
+
+			// Guard against an MSAA level the GPU/driver can't realise: some
+			// Mesa/Wayland setups fail eglChooseConfig at high sample counts,
+			// which crashes the renderer at launch ("no display modes could be
+			// found"). Probe the chosen level against the installed engine and
+			// step down to the highest that works. Best-effort: if the engine
+			// isn't built or can't be probed here, the user's choice is kept.
+			buildDir = resolveBuildDir(root, buildDir)
+			p := install.DetectPlatform(buildDir)
+			if usable, probed := gfxprobe.HighestSupportedMSAA(
+				cmd.Context(), p, buildDir, cfg.Graphics.MSAA, msaaLevels,
+			); probed && usable != cfg.Graphics.MSAA {
+				cmd.Printf("note: %dx MSAA is unsupported on this GPU/driver; using %s instead.\n",
+					cfg.Graphics.MSAA, msaaLabel(usable))
+				cfg.Graphics.MSAA = usable
+			}
+
 			path, err := cfg.Save()
 			if err != nil {
 				return err

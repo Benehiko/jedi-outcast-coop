@@ -46,8 +46,12 @@ type Options struct {
 	Connect string
 	// Port is the UDP port for Host mode (0 uses install.DefaultPort).
 	Port int
-	// Fullscreen runs the engine fullscreen; when false it runs windowed.
-	Fullscreen bool
+	// ForceWindowed forces windowed for this run (the `--windowed` flag),
+	// overriding the config's Fullscreen setting via a command-line +set that
+	// runs after autoexec. When false the config decides: the refreshed
+	// autoexec_sp.cfg already carries r_fullscreen from Graphics.Fullscreen, so
+	// nothing is forced on the command line.
+	ForceWindowed bool
 	// SkipCutscenes sets g_skipIntroCinematics 1 for this run.
 	SkipCutscenes bool
 	// Extra are additional raw engine arguments appended verbatim (after the
@@ -62,9 +66,9 @@ func Args(p install.Platform, opts *Options) ([]string, error) {
 		"+set", "fs_basepath", p.DataDir,
 	}
 
-	if opts.Fullscreen {
-		args = append(args, "+set", "r_fullscreen", "1")
-	} else {
+	// Only force windowed when the flag asked for it; otherwise the config-driven
+	// autoexec r_fullscreen wins (do not override it on the command line).
+	if opts.ForceWindowed {
 		args = append(args, "+set", "r_fullscreen", "0")
 	}
 	if opts.SkipCutscenes {

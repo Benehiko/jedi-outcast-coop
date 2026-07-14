@@ -14,7 +14,7 @@ func testPlatform() install.Platform {
 func joined(args []string) string { return strings.Join(args, " ") }
 
 func TestArgsSinglePlayerDefaults(t *testing.T) {
-	got, err := Args(testPlatform(), &Options{Mode: SinglePlayer, Fullscreen: true})
+	got, err := Args(testPlatform(), &Options{Mode: SinglePlayer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,8 +22,10 @@ func TestArgsSinglePlayerDefaults(t *testing.T) {
 	if !strings.Contains(s, "+set fs_basepath /data") {
 		t.Errorf("missing fs_basepath: %s", s)
 	}
-	if !strings.Contains(s, "+set r_fullscreen 1") {
-		t.Errorf("missing fullscreen: %s", s)
+	// With no --windowed the config-driven autoexec decides fullscreen; the
+	// command line must not force r_fullscreen either way.
+	if strings.Contains(s, "r_fullscreen") {
+		t.Errorf("default launch must not force r_fullscreen: %s", s)
 	}
 	if !strings.HasSuffix(s, "+map "+install.DefaultMap) {
 		t.Errorf("want default map at end, got: %s", s)
@@ -37,7 +39,7 @@ func TestArgsWindowedAndSkipAndExtra(t *testing.T) {
 	got, err := Args(testPlatform(), &Options{
 		Mode:          SinglePlayer,
 		Map:           "t2_trip",
-		Fullscreen:    false,
+		ForceWindowed: true,
 		SkipCutscenes: true,
 		Extra:         []string{"+set", "r_mode", "-2"},
 	})
@@ -60,7 +62,7 @@ func TestArgsWindowedAndSkipAndExtra(t *testing.T) {
 }
 
 func TestArgsHostUsesDefaultPort(t *testing.T) {
-	got, err := Args(testPlatform(), &Options{Mode: Host, Fullscreen: true})
+	got, err := Args(testPlatform(), &Options{Mode: Host})
 	if err != nil {
 		t.Fatal(err)
 	}

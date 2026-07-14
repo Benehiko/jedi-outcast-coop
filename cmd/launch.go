@@ -43,13 +43,13 @@ func runLaunch(cmd *cobra.Command, lp *launchParams, mode launch.Mode, connect s
 
 	p := install.DetectPlatform(buildDir)
 	opts := &launch.Options{
-		Mode:       mode,
-		BuildDir:   buildDir,
-		Map:        lp.mapName,
-		Connect:    connect,
-		Port:       lp.port,
-		Fullscreen: !lp.windowed,
-		Extra:      extra,
+		Mode:          mode,
+		BuildDir:      buildDir,
+		Map:           lp.mapName,
+		Connect:       connect,
+		Port:          lp.port,
+		ForceWindowed: lp.windowed,
+		Extra:         extra,
 	}
 
 	if lp.printOnly {

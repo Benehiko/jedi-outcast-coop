@@ -174,12 +174,45 @@ The high-fidelity preset writes (latched cvars apply after a restart):
 | `r_lodscale` | `20` | Push LOD transitions further out. |
 
 MSAA (`r_ext_multisample`) is **not** part of this preset — set it separately
-via `jk2coop graphics` (`[graphics] msaa`: 0/2/4/8). It is latched; the driver
-falls back to a lower sample count if it can't provide the requested one.
+via `jk2coop graphics` (`[graphics] msaa`: 0/2/4/8/16). It is latched.
+
+**Not every GPU/driver can provide every sample count.** On some Mesa/Wayland
+setups (radeonsi via SDL2's EGL path) a high sample count makes `eglChooseConfig`
+fail to find a matching config; `SDL_CreateWindow` then fails for *every*
+resolution and the renderer aborts with the misleading `...ERROR: no display
+modes could be found` / `could not load OpenGL subsystem`. The engine does **not**
+gracefully step down — it just fails to start.
+
+To prevent that, `jk2coop graphics` **probes the chosen MSAA level** against the
+installed engine when you save: it briefly launches the engine in a throwaway
+home path and watches for the EGL/display failure. If the level is unsupported it
+warns and writes the highest level that works instead (e.g. `16x` → `8x`). The
+probe is best-effort — if the engine isn't built yet or can't be probed, your
+choice is written unchanged. If you edit `[graphics] msaa` in `config.toml` by
+hand and the game then fails to start, lower it to `8` or below.
 
 Turning `[graphics] lighting` off (via `jk2coop graphics`) rebuilds the engine
 without the render-fidelity patch, reverting the overbright behaviour; pin the
 companion cvars back to their retail defaults by hand if you set them.
+
+### Display: resolution and fullscreen
+
+The generated `autoexec_sp.cfg` always pins the **custom video mode**
+(`r_mode -1`) with an explicit `r_customwidth`/`r_customheight`, rather than
+leaving the engine on a saved indexed `r_mode`. This is deliberate: an indexed
+mode saved by a previous run (e.g. `r_mode 17` = 2560×1440) can wedge startup on
+a display server that can't enumerate that exact mode — the same
+`no display modes could be found` failure. Pinning `-1` with a concrete size
+sidesteps the engine's indexed-mode list entirely.
+
+- `[graphics] res_width`/`res_height` set the size. `0`×`0` = **auto**, which
+  falls back to a small, always-creatable `1280×720` window. Pick a specific
+  resolution (or the detected native one) in `jk2coop graphics` for full size.
+- `[graphics] fullscreen` controls `r_fullscreen`. It **defaults to `false`
+  (windowed)**, which is the reliable choice on Wayland where fullscreen mode
+  enumeration is flaky. Tick *Fullscreen* in `jk2coop graphics` to opt in.
+- The launch `--windowed` flag still forces windowed for a single run,
+  overriding the config.
 
 The extra cost — uncompressed 32-bit full-res textures, anisotropic
 filtering, finer tessellation — is trivial on modern GPUs. Everything is a

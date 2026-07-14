@@ -44,15 +44,23 @@ func (c Config) AutoexecBytes() []byte {
 	// is written last and wins over any preset value.
 	b.WriteString(seta("r_ext_multisample", strconv.Itoa(c.Graphics.MSAA)))
 
-	// Resolution. A non-zero size selects the custom video mode (r_mode -1) at the
-	// requested width/height; 0x0 leaves the engine on its own r_mode so the game
-	// picks a mode as before.
-	if c.Graphics.ResWidth > 0 && c.Graphics.ResHeight > 0 {
-		b.WriteString("\n// resolution\n")
-		b.WriteString(seta("r_mode", "-1"))
-		b.WriteString(seta("r_customwidth", strconv.Itoa(c.Graphics.ResWidth)))
-		b.WriteString(seta("r_customheight", strconv.Itoa(c.Graphics.ResHeight)))
+	// Display. Always pin r_mode to the custom video mode (-1) with an explicit
+	// size so a stale indexed r_mode saved by a previous run (e.g. r_mode 17 =
+	// 2560x1440) can never wedge startup on a display server that fails to
+	// enumerate that indexed mode. When the user picked a resolution we use it;
+	// on "auto" (0x0) we fall back to a small size the engine can always create a
+	// window at. (Monitor detection for the "native" choice lives in the TUI,
+	// which writes the detected size into ResWidth/ResHeight — this stays a pure
+	// function so config output is deterministic.)
+	b.WriteString("\n// display\n")
+	b.WriteString(seta("r_fullscreen", boolCvar(c.Graphics.Fullscreen)))
+	w, h := c.Graphics.ResWidth, c.Graphics.ResHeight
+	if w <= 0 || h <= 0 {
+		w, h = AutoResFallback.W, AutoResFallback.H
 	}
+	b.WriteString(seta("r_mode", "-1"))
+	b.WriteString(seta("r_customwidth", strconv.Itoa(w)))
+	b.WriteString(seta("r_customheight", strconv.Itoa(h)))
 
 	return b.Bytes()
 }

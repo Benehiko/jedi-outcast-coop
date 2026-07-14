@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -141,7 +142,7 @@ func TestAutoexecRenderPreset(t *testing.T) {
 }
 
 func TestAutoexecResolution(t *testing.T) {
-	// A set resolution writes the custom video mode.
+	// A set resolution writes the custom video mode at that size.
 	c := Defaults()
 	c.Graphics.ResWidth = 2560
 	c.Graphics.ResHeight = 1440
@@ -156,13 +157,34 @@ func TestAutoexecResolution(t *testing.T) {
 		}
 	}
 
-	// Auto (0x0) writes no custom-mode cvars.
+	// Auto (0x0) still pins r_mode -1 with a safe fallback size, so a stale
+	// indexed r_mode from a prior run can never wedge startup.
 	auto := Defaults() // ResWidth/ResHeight default to 0
 	outAuto := string(auto.AutoexecBytes())
-	for _, unwanted := range []string{"r_customwidth", "r_customheight", `seta r_mode "-1"`} {
-		if strings.Contains(outAuto, unwanted) {
-			t.Errorf("auto resolution must not write %q in:\n%s", unwanted, outAuto)
+	for _, want := range []string{
+		`seta r_mode "-1"`,
+		`seta r_customwidth "` + strconv.Itoa(AutoResFallback.W) + `"`,
+		`seta r_customheight "` + strconv.Itoa(AutoResFallback.H) + `"`,
+	} {
+		if !strings.Contains(outAuto, want) {
+			t.Errorf("auto resolution missing %q in:\n%s", want, outAuto)
 		}
+	}
+	// Auto must never leave a stale indexed r_mode unqualified.
+	if strings.Contains(outAuto, `seta r_mode "17"`) {
+		t.Errorf("auto resolution must not carry a stale indexed r_mode:\n%s", outAuto)
+	}
+}
+
+func TestAutoexecFullscreen(t *testing.T) {
+	off := Defaults() // windowed by default
+	if !strings.Contains(string(off.AutoexecBytes()), `seta r_fullscreen "0"`) {
+		t.Errorf("default autoexec must be windowed (r_fullscreen 0):\n%s", off.AutoexecBytes())
+	}
+	on := Defaults()
+	on.Graphics.Fullscreen = true
+	if !strings.Contains(string(on.AutoexecBytes()), `seta r_fullscreen "1"`) {
+		t.Errorf("fullscreen config must write r_fullscreen 1:\n%s", on.AutoexecBytes())
 	}
 }
 
