@@ -62,8 +62,7 @@ upscaling them would distort the interface.
   the host is needed anymore.
 - **A container runtime** for the neural step: `nerdctl` or `podman`. The
   upscaler itself is **not** installed on your host — it runs in an ephemeral
-  container.
-- **A Real-ESRGAN ncnn-vulkan container image** (see below).
+  container built from a small image the tool creates on first use (see below).
 - **A GPU with Vulkan** is used automatically if `/dev/dri/renderD128` exists;
   otherwise it falls back to CPU (much slower).
 - **Disk space.** A full run expands the whole texture set several times over
@@ -78,25 +77,31 @@ upscaling them would distort the interface.
   A full 2× run over the retail set produces an override pak on the order of
   ~0.6 GB; a 4× run is several times larger.
 
-## Getting a Real-ESRGAN image
+## The Real-ESRGAN image (built for you)
 
-The tool expects an image whose entrypoint is the `realesrgan-ncnn-vulkan`
-binary and that bundles the standard models (`realesrgan-x4plus`,
-`realesr-animevideov3`, …), invoked as:
+The neural step runs `realesrgan-ncnn-vulkan` inside a container. The tool
+**builds this image itself on first use** — it does not pull from Docker Hub or
+any third-party registry (those images have a habit of disappearing). The build
+recipe is embedded in `jk2coop`; the image is tagged locally as
+`localhost/jk2coop-realesrgan:<version>` and cached by your runtime, so the
+build happens **once**.
+
+The image is built from a pinned upstream
+[Real-ESRGAN ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN/releases)
+zip (the binary plus the standard models: `realesrgan-x4plus`,
+`realesr-animevideov3`, `realesrgan-x4plus-anime`) on an Ubuntu 24.04 base with
+the Vulkan/Mesa drivers. The first run downloads ~46 MB and takes a minute or
+two; subsequent runs reuse the cached image.
+
+If you would rather supply your own image — e.g. one mirrored into your registry
+— pass it with `--image`. It must have the `realesrgan-ncnn-vulkan` binary as
+its entrypoint, bundle the models, and be invoked as:
 
 ```
 <image> -i /in -o /out -n <model> -s <scale> -f png
 ```
 
-Point the tool at whichever image you use with `--image`. If you maintain your
-own small image, a Containerfile is as short as fetching the upstream
-[Real-ESRGAN ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN/releases)
-zip (binary + `models/`) into a Vulkan-capable base and setting the binary as
-the entrypoint. Mirror it into your own registry if you prefer not to pull at
-run time.
-
-> The default image name is a convenience placeholder. Verify and pin an image
-> you trust; there is no single canonical published image for this.
+A user-supplied `--image` is used as-is and never rebuilt.
 
 ## Usage
 
