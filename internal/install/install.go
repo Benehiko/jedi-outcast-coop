@@ -36,6 +36,12 @@ type Options struct {
 	// interactive).
 	Out    io.Writer
 	Prompt func(question string) (bool, error)
+
+	// warnings accumulates one-line summaries of non-fatal failures (an optional
+	// mod that was requested but could not be built). They are reprinted in the
+	// final summary so a failure buried in the scrolling install log is not
+	// missed. Populated via warnf.
+	warnings []string
 }
 
 func (o *Options) sayf(format string, a ...any) {
@@ -48,6 +54,45 @@ func (o *Options) infof(format string, a ...any) {
 	if o.Out != nil {
 		_, _ = fmt.Fprintf(o.Out, "  "+format+"\n", a...)
 	}
+}
+
+// warnf reports a non-fatal failure prominently at the point it happens and
+// records a one-line summary for the end-of-run recap. summary is the short line
+// shown in the recap; detail lines (the underlying error, a docs pointer) are
+// printed now, indented under the warning. Install continues — these are
+// optional mods, not hard errors.
+func (o *Options) warnf(summary string, detail ...string) {
+	o.warnings = append(o.warnings, summary)
+	if o.Out == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(o.Out, "\n  ⚠ WARNING: %s\n", summary)
+	for _, d := range detail {
+		_, _ = fmt.Fprintf(o.Out, "      %s\n", d)
+	}
+}
+
+// summarize prints the closing "Installed" recap and a "Try:" lead-in. When any
+// optional mod failed (recorded via warnf) it says so up front and re-lists the
+// failures, so a warning buried in the scrolling log is impossible to miss. The
+// install itself still succeeded — the failed extras are optional.
+func (o *Options) summarize() {
+	n := len(o.warnings)
+	if n == 0 {
+		o.sayf("Installed. Try:")
+		return
+	}
+	plural := "warning"
+	if n > 1 {
+		plural = "warnings"
+	}
+	o.sayf("Installed, but %d %s — some requested extras did not build:", n, plural)
+	for _, w := range o.warnings {
+		o.sayf("    ✗ %s", w)
+	}
+	o.sayf("")
+	o.sayf("The game is installed and playable; the failed extras above are optional.")
+	o.sayf("Try:")
 }
 
 // Install stages the data dir and installs the launchers for the current
@@ -181,7 +226,7 @@ func Install(ctx context.Context, p Platform, opts *Options) error {
 	}
 
 	opts.sayf("")
-	opts.sayf("Installed. Try:")
+	opts.summarize()
 	opts.sayf("    jk2coop-host                      # host on port %d", defaultPort)
 	opts.sayf("    jk2coop-join 127.0.0.1 --second   # join from a second local client")
 	if !pathContains(p.BinDir) {

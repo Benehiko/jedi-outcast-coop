@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,7 +37,9 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 	if cfg.Graphics.Widescreen {
 		opts.sayf("Enabling widescreen video-menu modes…")
 		if _, err := paks.BuildWidescreen(baseDir, wsPak); err != nil {
-			opts.infof("widescreen build failed: %v", err)
+			opts.warnf("widescreen video-menu modes not installed",
+				fmt.Sprintf("%v", err),
+				"the game still runs; retail video modes remain available.")
 		} else {
 			_ = man.Add(wsPak)
 			opts.infof("installed zz-widescreen-menu.pk3 (SETUP > VIDEO > Video Mode)")
@@ -52,7 +55,10 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		if haveGPUContainer() {
 			opts.sayf("Generating AI material textures (this can take a while)…")
 			if err := runTool(ctx, tool, "--out", txPak); err != nil {
-				opts.infof("texture generation failed; see docs/asset-generation.md")
+				opts.warnf("AI texture generation failed — zzz-generated-textures.pk3 not installed",
+					fmt.Sprintf("%s exited: %v", filepath.Base(tool), err),
+					"scroll up for the tool's output; see docs/asset-generation.md",
+					fmt.Sprintf("re-run by hand: %s --out '%s'", tool, txPak))
 			} else {
 				_ = man.Add(txPak)
 				opts.infof("installed zzz-generated-textures.pk3")
@@ -71,7 +77,10 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		if haveGPUContainer() {
 			opts.sayf("Upscaling retail textures with Real-ESRGAN (this can take a while)…")
 			if err := runTool(ctx, tool, "--assets", filepath.Join(gamedata, "base"), "--out", upPak); err != nil {
-				opts.infof("upscale failed; see docs/hires-textures.md")
+				opts.warnf("texture upscale failed — zzz-hires-textures.pk3 not installed",
+					fmt.Sprintf("%s exited: %v", filepath.Base(tool), err),
+					"scroll up for the tool's output; see docs/hires-textures.md",
+					fmt.Sprintf("re-run by hand: %s --assets '%s/base' --out '%s'", tool, gamedata, upPak))
 			} else {
 				_ = man.Add(upPak)
 				opts.infof("installed zzz-hires-textures.pk3")
