@@ -12,10 +12,9 @@ import (
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
 )
 
-// msaaLevels mirrors the sample counts offered by the MSAA row, ascending. Used
-// by the write-time probe to fall back to the highest level the GPU/driver can
-// actually realise.
-var msaaLevels = []int{2, 4, 8, 16}
+// msaaLevels mirrors the sample counts offered by the MSAA row, ascending. It is
+// the canonical candidate list owned by gfxprobe, aliased here for the row.
+var msaaLevels = gfxprobe.MSAALevels
 
 // msaaLabel renders a sample count the way the MSAA row does ("off", "8x").
 func msaaLabel(n int) string {
@@ -121,11 +120,11 @@ func newGraphicsCmd() *cobra.Command {
 			// isn't built or can't be probed here, the user's choice is kept.
 			buildDir = resolveBuildDir(root, buildDir)
 			p := install.DetectPlatform(buildDir)
-			if usable, probed := gfxprobe.HighestSupportedMSAA(
-				cmd.Context(), p, buildDir, cfg.Graphics.MSAA, msaaLevels,
-			); probed && usable != cfg.Graphics.MSAA {
-				cmd.Printf("note: %dx MSAA is unsupported on this GPU/driver; using %s instead.\n",
-					cfg.Graphics.MSAA, msaaLabel(usable))
+			if usable, changed := gfxprobe.ClampMSAA(
+				cmd.Context(), p, buildDir, cfg.Graphics.MSAA,
+			); changed {
+				cmd.Printf("note: %s MSAA is unsupported on this GPU/driver; using %s instead.\n",
+					msaaLabel(cfg.Graphics.MSAA), msaaLabel(usable))
 				cfg.Graphics.MSAA = usable
 			}
 

@@ -183,13 +183,23 @@ resolution and the renderer aborts with the misleading `...ERROR: no display
 modes could be found` / `could not load OpenGL subsystem`. The engine does **not**
 gracefully step down — it just fails to start.
 
-To prevent that, `jk2coop graphics` **probes the chosen MSAA level** against the
-installed engine when you save: it briefly launches the engine in a throwaway
-home path and watches for the EGL/display failure. If the level is unsupported it
-warns and writes the highest level that works instead (e.g. `16x` → `8x`). The
-probe is best-effort — if the engine isn't built yet or can't be probed, your
-choice is written unchanged. If you edit `[graphics] msaa` in `config.toml` by
-hand and the game then fails to start, lower it to `8` or below.
+To prevent that, jk2coop **probes the chosen MSAA level** against the installed
+engine: it briefly launches the engine in a throwaway home path and watches for
+the EGL/display failure. If the level is unsupported it warns and steps down to
+the highest level that works instead (e.g. `16x` → `8x`). This guard runs at
+three points, so an unsupported value never reaches the engine:
+
+- **`jk2coop graphics`** — when you save an MSAA change.
+- **Any launch** (`jk2coop launch` / `host` / `join`) — the autoexec is refreshed
+  from `config.toml` before the game starts, and the clamp runs there. This is the
+  catch-all: even a value edited into `config.toml` by hand, or written by an
+  older install, is stepped down before the engine sees it. A change is saved back
+  to `config.toml` so it sticks and the next launch needs no re-probe.
+
+The probe is best-effort — if the engine isn't built yet or the machine can't be
+probed (no display server), your choice is written unchanged rather than
+second-guessed. If the game still fails to start after a hand-edit on a machine
+that can't be probed, lower `[graphics] msaa` to `8` or below.
 
 Turning `[graphics] lighting` off (via `jk2coop graphics`) rebuilds the engine
 without the render-fidelity patch, reverting the overbright behaviour; pin the

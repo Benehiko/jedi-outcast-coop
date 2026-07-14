@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/config"
+	"github.com/Benehiko/jedi-outcast-coop/internal/gfxprobe"
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 )
 
@@ -15,12 +16,35 @@ import (
 // a settings change takes effect on the next launch without a full reinstall.
 // It is best-effort: if nothing is installed yet (no base dir), it quietly does
 // nothing — the next `jk2coop install` will write it.
+//
+// Before writing it clamps the config's MSAA to a level this GPU/driver can
+// actually realise (some Mesa/Wayland stacks fail eglChooseConfig at high sample
+// counts, which crashes the renderer at launch with a misleading "no display
+// modes could be found"). This is the guard on the launch path too: every
+// launch verb refreshes autoexec through here first, so a stale unsupported MSAA
+// is stepped down before the engine ever sees it. A change is persisted back to
+// config.toml so the fix is sticky and the next run needs no re-probe.
 func refreshAutoexec(cmd *cobra.Command, cfg config.Config) {
-	p := install.DetectPlatform(install.EnvOr("JK2_BUILD", ""))
+	buildDir := install.EnvOr("JK2_BUILD", "")
+	p := install.DetectPlatform(buildDir)
 	baseDir := p.BaseDir()
 	if _, err := os.Stat(baseDir); err != nil {
 		return // not installed yet
 	}
+
+	if usable, changed := gfxprobe.ClampMSAA(
+		cmd.Context(), p, buildDir, cfg.Graphics.MSAA,
+	); changed {
+		cmd.Printf("note: %s MSAA is unsupported on this GPU/driver; using %s instead.\n",
+			msaaLabel(cfg.Graphics.MSAA), msaaLabel(usable))
+		cfg.Graphics.MSAA = usable
+		if path, err := cfg.Save(); err != nil {
+			cmd.Printf("note: could not persist the MSAA change (%v)\n", err)
+		} else {
+			cmd.Printf("updated %s\n", path)
+		}
+	}
+
 	cfgPath := filepath.Join(baseDir, "autoexec_sp.cfg")
 	if err := os.WriteFile(cfgPath, cfg.AutoexecBytes(), 0o644); err != nil {
 		cmd.Printf("note: could not refresh autoexec (%v); run `jk2coop install`\n", err)

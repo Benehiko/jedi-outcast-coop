@@ -154,7 +154,7 @@ skip_cutscenes = false
 [graphics]
 widescreen = true        # patch-backed (needs rebuild to change)
 lighting = true          # render-fidelity patch (needs rebuild)
-msaa = 0                 # r_ext_multisample: 0/2/4/8 (runtime cvar)
+msaa = 0                 # r_ext_multisample: 0/2/4/8/16 (runtime cvar; auto-clamped if the GPU can't do it)
 texture_upscale = false  # GPU pak
 texture_resolution = 2048 # upscale tier: 1024 (1K) / 2048 (2K) / 4096 (4K)
 texture_generate = false # GPU pak

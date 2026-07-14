@@ -168,6 +168,32 @@ func containsAny(b []byte, subs [][]byte) bool {
 	return false
 }
 
+// MSAALevels are the multisample sample counts the graphics menu offers, ascending.
+// It is the canonical candidate list ClampMSAA walks when stepping a requested
+// level down to one the GPU/driver can realise.
+var MSAALevels = []int{2, 4, 8, 16}
+
+// ClampMSAA returns the highest supported sample count at or below want for this
+// machine's engine, and whether it changed from want. It is the single entry
+// point the launch/install/refresh paths use to keep an unsupported stored MSAA
+// (e.g. 16 on a Mesa/Wayland stack whose eglChooseConfig can't match it) from
+// crashing the renderer at launch.
+//
+// Best-effort: when probing is unavailable (engine not built, no display server,
+// probe timed out) it returns want unchanged with changed=false, so an
+// un-probeable machine keeps the user's choice rather than being second-guessed.
+// want <= 0 (MSAA off) is always returned unchanged.
+func ClampMSAA(ctx context.Context, p install.Platform, buildDir string, want int) (usable int, changed bool) {
+	if want <= 0 {
+		return want, false
+	}
+	got, probed := HighestSupportedMSAA(ctx, p, buildDir, want, MSAALevels)
+	if !probed {
+		return want, false
+	}
+	return got, got != want
+}
+
 // HighestSupportedMSAA returns the largest value in candidates (which must be
 // sorted ascending, e.g. {2,4,8,16}) that the engine can realise, at or below
 // want. It returns want unchanged if probing is unavailable, so a machine that
