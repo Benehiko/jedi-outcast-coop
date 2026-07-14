@@ -46,6 +46,14 @@ If you would rather not build the engine at all, download a prebuilt one and
 skip to install: fetch the `jk2coop-windows` artifact from a green
 [CI run](../.github/workflows/build.yml).
 
+If you have [`vee`](https://github.com/Benehiko/vee) installed, `jk2coop setup
+--docker` builds the Windows engine **without installing Visual Studio, CMake,
+or Docker** on your machine: it cross-compiles with mingw-w64 inside a container
+running in a small vee VM, and the resulting `.exe`/`.dll` run on your Windows
+host. See [building.md](building.md#building-in-a-container---docker) for how the
+container path works and its target matrix. (The MSVC path above is still the
+reference for patch development and what CI uses.)
+
 To build the engine from the OpenJK **submodule** by hand instead (patch
 development), see [embedded-source.md](embedded-source.md) and:
 
