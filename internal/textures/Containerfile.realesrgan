@@ -1,0 +1,32 @@
+# Real-ESRGAN ncnn-vulkan image, built on demand by `jk2coop dev textures
+# upscale`. We build this ourselves from a pinned upstream GitHub *release
+# asset* rather than depending on a third-party registry tag (every published
+# realesrgan-ncnn-vulkan Docker Hub image we relied on has since been deleted).
+#
+# The release zip bundles the binary AND the models/ dir (realesrgan-x4plus,
+# realesr-animevideov3, realesrgan-x4plus-anime). The binary resolves models/
+# relative to its working directory, so WORKDIR must be the extract dir.
+FROM docker.io/library/ubuntu:24.04
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip \
+        libgomp1 \
+        libvulkan1 \
+        mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pinned upstream release. Bump the tag/date together with LocalUpscaleImage in
+# container.go so the cached image tag and its contents stay in lockstep.
+ARG REALESRGAN_URL=https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip
+
+RUN curl -fsSL -o /tmp/realesrgan.zip "$REALESRGAN_URL" \
+    && mkdir -p /opt/realesrgan \
+    && unzip -q /tmp/realesrgan.zip -d /opt/realesrgan \
+    && rm /tmp/realesrgan.zip \
+    && chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan
+
+WORKDIR /opt/realesrgan
+ENTRYPOINT ["/opt/realesrgan/realesrgan-ncnn-vulkan"]

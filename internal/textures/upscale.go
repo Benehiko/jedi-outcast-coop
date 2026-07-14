@@ -3,6 +3,7 @@ package textures
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,8 +13,10 @@ import (
 )
 
 // DefaultUpscaleImage is the container image providing the
-// realesrgan-ncnn-vulkan binary. Override with --image / UpscaleOptions.Image.
-const DefaultUpscaleImage = "docker.io/utkuozbulak/realesrgan-ncnn-vulkan:latest"
+// realesrgan-ncnn-vulkan binary. It defaults to a local tag we build ourselves
+// on first use (see LocalUpscaleImage / Containerfile.realesrgan) rather than a
+// third-party registry image. Override with --image / UpscaleOptions.Image.
+const DefaultUpscaleImage = LocalUpscaleImage
 
 // DefaultUpscaleModel is the photographic Real-ESRGAN model.
 const DefaultUpscaleModel = "realesrgan-x4plus"
@@ -356,12 +359,41 @@ func snapAndCollect(upDir, potDir string, origExt map[string]string, builder *pk
 // writing PNGs to upDir. It assembles GPU passthrough (a DRI render node,
 // unless ForceCPU) the same way the shell tool did.
 func runUpscaleContainer(ctx context.Context, rt Runtime, opts UpscaleOptions, inDir, upDir string) error {
+	// Build our own image on first use (no-op for a user-supplied --image).
+	if err := rt.EnsureUpscaleImage(ctx, opts.Image, opts.Progress); err != nil {
+		return err
+	}
+
+	// realesrgan-ncnn-vulkan's directory mode is NOT recursive — it only reads
+	// the top level of -i. Our inputs mirror the pak's nested tree
+	// (textures/…, models/…), so we flatten every PNG into a single scratch
+	// dir for the container, run it once, then restore the outputs to their
+	// nested paths under upDir.
+	flatIn, err := os.MkdirTemp(filepath.Dir(inDir), "flat-in-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(flatIn) }()
+	flatOut, err := os.MkdirTemp(filepath.Dir(upDir), "flat-out-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(flatOut) }()
+
+	flatToRel, err := flattenTree(inDir, flatIn)
+	if err != nil {
+		return err
+	}
+	if len(flatToRel) == 0 {
+		return fmt.Errorf("no PNG inputs to upscale")
+	}
+
 	run := ContainerRun{
 		Runtime: rt,
 		Image:   opts.Image,
 		Mounts: []string{
-			inDir + ":/in:ro",
-			upDir + ":/out",
+			flatIn + ":/in:ro",
+			flatOut + ":/out",
 		},
 		// realesrgan-ncnn-vulkan: -i dir -o dir -n model -s scale -f png.
 		Args: []string{
@@ -378,5 +410,76 @@ func runUpscaleContainer(ctx context.Context, rt Runtime, opts UpscaleOptions, i
 	} else {
 		opts.progress("running Real-ESRGAN on CPU (no GPU passthrough) — this is slow")
 	}
-	return run.Run(ctx)
+	if err := run.Run(ctx); err != nil {
+		return err
+	}
+
+	return unflattenTree(flatOut, upDir, flatToRel)
+}
+
+// flattenTree copies every .png under srcDir (at any depth) into a single flat
+// dstDir, giving each a unique numeric name. It returns a map from the flat
+// filename (e.g. "000123.png") back to the original srcDir-relative path, so
+// the upscaled outputs can be restored to their nested locations.
+func flattenTree(srcDir, dstDir string) (map[string]string, error) {
+	flatToRel := make(map[string]string)
+	i := 0
+	err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || strings.ToLower(filepath.Ext(path)) != ".png" {
+			return nil
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		flat := fmt.Sprintf("%08d.png", i)
+		i++
+		flatToRel[flat] = filepath.ToSlash(rel)
+		if err := copyFile(path, filepath.Join(dstDir, flat)); err != nil {
+			return err
+		}
+		return nil
+	})
+	return flatToRel, err
+}
+
+// unflattenTree moves each upscaled flat output back to its original nested
+// path under dstDir, using the mapping from flattenTree. Outputs with no known
+// mapping are skipped.
+func unflattenTree(flatOut, dstDir string, flatToRel map[string]string) error {
+	for flat, rel := range flatToRel {
+		src := filepath.Join(flatOut, flat)
+		if _, err := os.Stat(src); err != nil {
+			continue // upscaler produced no output for this input; skip
+		}
+		dst := filepath.Join(dstDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := copyFile(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyFile copies src to dst, creating or truncating dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
