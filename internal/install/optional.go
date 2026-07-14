@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/paks"
+	"github.com/Benehiko/jedi-outcast-coop/internal/textures"
 )
 
 // zz/zzz override paks the optional mods produce, relative to base/. Listed so
@@ -51,14 +50,18 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 	// --- Generated AI material textures (GPU + container; Linux-only) ------
 	if generate {
 		txPak := filepath.Join(baseDir, "zzz-generated-textures.pk3")
-		tool := filepath.Join(opts.RepoRoot, "tools", "generate-textures.sh")
-		if haveGPUContainer() {
+		if textures.GPUAvailable() {
 			opts.sayf("Generating AI material textures (this can take a while)…")
-			if err := runTool(ctx, tool, "--out", txPak); err != nil {
+			_, err := textures.BuildGeneratedPak(ctx, textures.GenerateOptions{
+				OutPath:  txPak,
+				HFToken:  os.Getenv("HF_TOKEN"),
+				Progress: func(s string) { opts.infof("%s", s) },
+			})
+			if err != nil {
 				opts.warnf("AI texture generation failed — zzz-generated-textures.pk3 not installed",
-					fmt.Sprintf("%s exited: %v", filepath.Base(tool), err),
+					err.Error(),
 					"scroll up for the tool's output; see docs/asset-generation.md",
-					fmt.Sprintf("re-run by hand: %s --out '%s'", tool, txPak))
+					fmt.Sprintf("re-run by hand: jk2coop dev textures generate --out '%s'", txPak))
 			} else {
 				_ = man.Add(txPak)
 				opts.infof("installed zzz-generated-textures.pk3")
@@ -66,21 +69,26 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		} else {
 			opts.infof("no GPU container runtime detected (need nerdctl/podman + /dev/kfd).")
 			opts.infof("run it later on a suitable Linux machine:")
-			opts.infof("    %s --out '%s'", tool, txPak)
+			opts.infof("    jk2coop dev textures generate --out '%s'", txPak)
 		}
 	}
 
 	// --- Real-ESRGAN hi-res texture upscale (GPU + container; Linux-only) --
 	if upscale {
 		upPak := filepath.Join(baseDir, "zzz-hires-textures.pk3")
-		tool := filepath.Join(opts.RepoRoot, "tools", "upscale-textures.sh")
-		if haveGPUContainer() {
+		assetsBase := filepath.Join(gamedata, "base")
+		if textures.GPUAvailable() {
 			opts.sayf("Upscaling retail textures with Real-ESRGAN (this can take a while)…")
-			if err := runTool(ctx, tool, "--assets", filepath.Join(gamedata, "base"), "--out", upPak); err != nil {
+			_, err := textures.BuildUpscaledPak(ctx, textures.UpscaleOptions{
+				AssetsDir: assetsBase,
+				OutPath:   upPak,
+				Progress:  func(s string) { opts.infof("%s", s) },
+			})
+			if err != nil {
 				opts.warnf("texture upscale failed — zzz-hires-textures.pk3 not installed",
-					fmt.Sprintf("%s exited: %v", filepath.Base(tool), err),
+					err.Error(),
 					"scroll up for the tool's output; see docs/hires-textures.md",
-					fmt.Sprintf("re-run by hand: %s --assets '%s/base' --out '%s'", tool, gamedata, upPak))
+					fmt.Sprintf("re-run by hand: jk2coop dev textures upscale --assets '%s' --out '%s'", assetsBase, upPak))
 			} else {
 				_ = man.Add(upPak)
 				opts.infof("installed zzz-hires-textures.pk3")
@@ -88,7 +96,7 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		} else {
 			opts.infof("no GPU container runtime detected (need nerdctl/podman + /dev/kfd).")
 			opts.infof("run it later on a suitable Linux machine:")
-			opts.infof("    %s --assets '%s/base' --out '%s'", tool, gamedata, upPak)
+			opts.infof("    jk2coop dev textures upscale --assets '%s' --out '%s'", assetsBase, upPak)
 		}
 	}
 
@@ -111,31 +119,4 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		}
 	}
 	return nil
-}
-
-// haveGPUContainer reports whether a container runtime + AMD ROCm device is
-// available for the GPU texture mods (Linux only).
-func haveGPUContainer() bool {
-	if runtime.GOOS != "linux" {
-		return false
-	}
-	if !hasCmd("nerdctl") && !hasCmd("podman") {
-		return false
-	}
-	_, err := os.Stat("/dev/kfd")
-	return err == nil
-}
-
-func hasCmd(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
-// runTool invokes a still-shell texture tool, streaming its output. These GPU
-// pipelines remain shell scripts pending a phase-2 Go port.
-func runTool(ctx context.Context, tool string, args ...string) error {
-	cmd := exec.CommandContext(ctx, tool, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }

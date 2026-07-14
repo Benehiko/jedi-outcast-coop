@@ -61,6 +61,7 @@ func newDevCmd() *cobra.Command {
 	dev.AddCommand(newPatchesCmd())
 	dev.AddCommand(newPk3Cmd())
 	dev.AddCommand(newGfxCmd())
+	dev.AddCommand(newTexturesCmd())
 	return dev
 }
 

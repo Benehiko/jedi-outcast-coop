@@ -1,10 +1,15 @@
 # Generating original textures with a local AI model
 
-`tools/generate-textures.sh` creates **original, non-branded surface textures**
-with a locally-run, openly-licensed generative model (FLUX.1-schnell), and
-packs them into a pk3 you can ship or use. This is distinct from
+`jk2coop dev textures generate` creates **original, non-branded surface
+textures** with a locally-run, openly-licensed generative model (FLUX.1-schnell),
+and packs them into a pk3 you can ship or use. This is distinct from
 [hires-textures.md](hires-textures.md), which *upscales your own retail art* and
 therefore only ever runs on your own copy.
+
+The extract/snap/pack plumbing is native Go inside the `jk2coop` binary; only
+the model itself runs in an ephemeral container. The GPU-tuning environment
+variables below are forwarded to that container unchanged, so every recipe that
+worked with the old shell script works here verbatim.
 
 ## Why these assets are safe to ship — and where the limits are
 
@@ -62,7 +67,7 @@ no longer saves you — trademark governs.
   ephemeral container; nothing is installed on the host for it.
 - A **GPU**:
   - **AMD (ROCm)** — the default. Needs a ROCm-capable card and the ROCm
-    userspace in the image (the script passes `/dev/kfd` + `/dev/dri`). RDNA4
+    userspace in the image (it passes `/dev/kfd` + `/dev/dri`). RDNA4
     (e.g. RX 9070) is supported from ROCm 7.2 onward.
   - **NVIDIA (CUDA)** — pass `--cuda` (needs the NVIDIA container toolkit).
 - **VRAM**: FLUX.1-schnell in bf16 wants a lot (~ high-teens GB) for 1024²; if
@@ -87,13 +92,12 @@ One-time setup:
    your account is granted access.
 2. Create a **read**-scoped token at
    <https://huggingface.co/settings/tokens>.
-3. Provide it to the tool as the `HF_TOKEN` environment variable — the script
-   passes it into the container (as `HF_TOKEN` + `HUGGING_FACE_HUB_TOKEN`) only
+3. Provide it to the tool as the `HF_TOKEN` environment variable — it is passed into the container (as `HF_TOKEN` + `HUGGING_FACE_HUB_TOKEN`) only
    for the download; it is never written to the image, the pak, or the logs:
 
    ```sh
    export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-   tools/generate-textures.sh
+   jk2coop dev textures generate
    ```
 
    Treat the token as a secret. Prefer exporting it in your shell over putting it
@@ -118,7 +122,7 @@ with `GEN_VRAM_MODE`:
 | `sequential` | ~4–8 GB VRAM, but moves the **whole model into host RAM** (~24 GB) | `enable_sequential_cpu_offload` — lowest VRAM, slowest, and RAM-hungry on the host. |
 
 ```sh
-GEN_VRAM_MODE=sequential tools/generate-textures.sh   # lowest VRAM
+GEN_VRAM_MODE=sequential jk2coop dev textures generate   # lowest VRAM
 ```
 
 ### Known limitation on 16 GB RDNA4 (measured)
@@ -146,7 +150,7 @@ end-to-end on the RX 9070, producing a full 10-material pack of clean textures:
 
 ```sh
 GEN_FP8=1 GEN_FP8_TE=0 GEN_VRAM_MODE=model GEN_VAE_FP32=1 \
-  HF_HUB_OFFLINE=1 tools/generate-textures.sh --size 512
+  HF_HUB_OFFLINE=1 jk2coop dev textures generate --size 512
 ```
 
 Two RDNA4-specific details make this work:
@@ -163,7 +167,7 @@ Two RDNA4-specific details make this work:
 - **512² only.** 1024² OOMs during attention: after the fp8 model + activations
   (~13.5 GB) the math-SDPA attention step needs ~1.9 GB and only ~1.8 GB is free.
   Generate at `--size 512`; to go larger, upscale the 512² output afterwards with
-  `tools/upscale-textures.sh` (Real-ESRGAN) rather than pushing FLUX to 1024².
+  `jk2coop dev textures upscale` (Real-ESRGAN) rather than pushing FLUX to 1024².
 
 Plain **bf16 without fp8 also OOMs** even in `model` offload at 512² on this card
 (a transformer submodule's `.to(device)` fails with the GPU already ~15.4 GB
@@ -209,19 +213,19 @@ container toolkit; a 16 GB+ NVIDIA card runs `model` offload comfortably and
 
 ```sh
 # preview the manifest + settings without generating anything:
-tools/generate-textures.sh --dry-run
+jk2coop dev textures generate --dry-run
 
 # generate the built-in generic material set (AMD/ROCm, 1024², 4 steps):
-tools/generate-textures.sh
+jk2coop dev textures generate
 
 # NVIDIA instead:
-tools/generate-textures.sh --cuda
+jk2coop dev textures generate --cuda
 
 # smaller/faster (lower VRAM):
-tools/generate-textures.sh --size 512
+jk2coop dev textures generate --size 512
 
 # your own material prompts (name|prompt per line), still non-branded:
-tools/generate-textures.sh --manifest my-materials.txt
+jk2coop dev textures generate --manifest my-materials.txt
 ```
 
 Key options (`--help` lists all):
