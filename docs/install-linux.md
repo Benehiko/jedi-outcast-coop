@@ -28,26 +28,38 @@ modifies nothing there.
 ## Fastest path: `jk2coop setup`
 
 If you just want to play, run the one guided command and skip the manual build
-steps below:
+steps below. A pre-built `jk2coop` binary **carries the engine source inside
+it**, so you need neither a git clone nor the OpenJK submodule:
+
+```sh
+./jk2coop setup       # extract embedded source + patches + build + install, guided
+```
+
+Or build `jk2coop` yourself from a clone first:
 
 ```sh
 git clone --recurse-submodules <repo>
 cd jedi-outcast-coop
 make build            # produces ./jk2coop
-./jk2coop setup       # submodule + patches + build + install, guided
+./jk2coop setup       # same guided setup, from the embedded source
 ```
 
-`setup` initialises the OpenJK submodule, applies the co-op patches, builds the
-engine, and installs. If the build tools (`cmake`, `ninja`, a C compiler) are
-missing it prints the exact install command for your distro (apt / pacman / dnf)
-and stops so you can install them and re-run. If you have
+`setup` extracts the embedded OpenJK source into a work directory
+(`~/.cache/jk2coop`), applies the co-op patches (in pure Go — no `git` needed),
+builds the engine, and installs. If the build tools (`cmake`, `ninja`, a C
+compiler) are missing it prints the exact install command for your distro
+(apt / pacman / dnf) and stops so you can install them and re-run. If you have
 [`vee`](https://github.com/Benehiko/vee), `setup` can instead build the engine
 inside a clean throwaway VM, so you never install a compiler on the host — it
 prompts, or force the choice with `--vm` / `--host`. After a VM build it offers
 to delete the VM (kept by default for fast rebuilds).
 
-The manual steps 1–2 below are what `setup` automates; use them if you want to
-drive each stage yourself.
+The manual steps 1–2 below build from the OpenJK **submodule** instead of the
+embedded source. They are the reference for **patch development**; a normal
+install does not need them. To make `setup`/`install` use the submodule rather
+than the embedded source, pass `--repo .` from inside a checkout. See
+[embedded-source.md](embedded-source.md) for how the embedded source is pruned,
+patched, and kept in sync with the pin.
 
 ## 1. Build the binaries
 
