@@ -1,5 +1,23 @@
 # Building
 
+## Quick start (one command)
+
+Most people should not run the manual steps below. From a fresh clone:
+
+```sh
+git clone --recurse-submodules <repo>
+cd jedi-outcast-coop
+make build            # produces ./jk2coop
+./jk2coop setup       # submodule + patches + engine build + install, guided
+```
+
+`jk2coop setup` does everything the manual sections below describe, in order,
+and stops with a clear, copy-paste install command if a build tool is missing.
+If you have [`vee`](https://github.com/Benehiko/vee) it can also build the
+engine inside a disposable VM, so you never install a C/C++ toolchain on the
+host — `setup` prompts for this (or force it with `--vm` / `--host`). The rest
+of this document is the manual reference `setup` automates.
+
 ## Repository layout
 
 - `openjk/` — pinned OpenJK submodule (upstream source; co-op changes are

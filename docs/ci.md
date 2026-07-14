@@ -1,7 +1,10 @@
 # Continuous integration
 
-GitHub Actions gate every push to `main` and every pull request. There are two
-workflows; all jobs must pass before a change merges.
+GitHub Actions gate every push to `main` and every pull request. The two
+workflows documented below — `build.yml` and `lint.yml` — must pass before a
+change merges. Two more run alongside them: `go.yml` (Go build + unit tests for
+the `jk2coop` tool) and `release.yml` (builds and attaches the pre-built
+`jk2coop` binaries to a tagged release).
 
 ## `build.yml` — compile the engine
 

@@ -26,11 +26,22 @@ The installer only ever **symlinks** your existing retail files into the
 place the engine looks for them. It copies nothing from your game install and
 modifies nothing there.
 
+## Fastest path: `jk2coop setup`
+
+`./jk2coop setup` (after `make build`) initialises the submodule, applies the
+co-op patches, builds the engine, and installs in one guided step. If the build
+tools are missing it prints the `xcode-select --install` + `brew install …`
+commands to run, then re-run `setup`. (The VM build option is Linux-only; on
+macOS `setup` builds on the host.)
+
+The manual steps 1–2 below are what `setup` automates.
+
 ## 1. Build the binaries
 
 You need the Xcode command-line tools and the OpenJK build dependencies
 (`cmake`, `SDL2`, `OpenAL`, `zlib`, `libpng`, `libjpeg` — for example via
-Homebrew). Build the JK2 singleplayer engine, renderer, and gamecode as on any
+Homebrew). `jk2coop setup` checks for these and prints the exact install
+commands if any are missing. Build the JK2 singleplayer engine, renderer, and gamecode as on any
 platform; see the [OpenJK macOS build
 notes](https://github.com/JACoders/OpenJK) for toolchain specifics.
 

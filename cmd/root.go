@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 		Use:   "jk2coop",
 		Short: "Jedi Outcast co-op — install, play, and tune",
 		Long: "jk2coop installs and runs the Jedi Outcast co-op rebuild.\n\n" +
+			"  jk2coop setup              first-time: fetch, build, and install\n" +
 			"  jk2coop install            install the engine + your settings\n" +
 			"  jk2coop launch             play (hosts co-op by default)\n" +
 			"  jk2coop host               host a co-op game\n" +
@@ -31,7 +32,8 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
-	// The seven user-facing actions.
+	// The user-facing actions.
+	root.AddCommand(newSetupCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newLaunchCmd())
 	root.AddCommand(newHostCmd())

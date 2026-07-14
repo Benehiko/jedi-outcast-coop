@@ -36,26 +36,7 @@ func newInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if buildDir == "" {
-				buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
-			}
-
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-
-			p := install.DetectPlatform(buildDir)
-			opts := &install.Options{
-				RepoRoot:  root,
-				BuildDir:  buildDir,
-				GameData:  gamedata,
-				Config:    &cfg,
-				AssumeYes: yes,
-				Out:       cmd.OutOrStdout(),
-				Prompt:    stdinPrompt(cmd),
-			}
-			return install.Install(cmd.Context(), p, opts)
+			return runInstall(cmd, root, buildDir, gamedata, yes)
 		},
 	}
 
@@ -65,6 +46,33 @@ func newInstallCmd() *cobra.Command {
 	f.StringVar(&gamedata, "gamedata", "", "path to your Jedi Outcast GameData dir (default: Steam autodetect)")
 	f.BoolVarP(&yes, "yes", "y", false, "assume \"yes\" to prompts (non-interactive)")
 	return cmd
+}
+
+// runInstall builds the install Options and runs the installer. Shared by the
+// `install` command and by `setup` (which runs it after building the engine),
+// so the two paths stage the data dir and launchers identically. An empty
+// buildDir defaults to <root>/openjk/build (or $JK2_BUILD).
+func runInstall(cmd *cobra.Command, root, buildDir, gamedata string, yes bool) error {
+	if buildDir == "" {
+		buildDir = install.EnvOr("JK2_BUILD", filepath.Join(root, "openjk", "build"))
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	p := install.DetectPlatform(buildDir)
+	opts := &install.Options{
+		RepoRoot:  root,
+		BuildDir:  buildDir,
+		GameData:  gamedata,
+		Config:    &cfg,
+		AssumeYes: yes,
+		Out:       cmd.OutOrStdout(),
+		Prompt:    stdinPrompt(cmd),
+	}
+	return install.Install(cmd.Context(), p, opts)
 }
 
 // stdinPrompt returns a y/N prompt bound to stdin, or nil when stdin is not a
