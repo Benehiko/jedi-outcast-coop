@@ -6,9 +6,11 @@ building the override paks, and installing the co-op engine data directory and
 launchers. It is the recommended way to run these steps on Linux, macOS, and
 Windows — the shell scripts remain in `tools/` and continue to work unchanged.
 
-The GPU/container pipelines (texture generation, Real-ESRGAN upscale) and the
-headless render harnesses (`headless-verify.sh`, `soak-m4.sh`) are still shell
-scripts; the installer shells out to them for the optional texture mods.
+The GPU/container texture pipelines (texture generation, Real-ESRGAN upscale)
+are now native Go too, under `jk2coop dev textures …` — only the model itself
+runs in an ephemeral container; the installer calls them in-process for the
+optional texture mods. The headless render harnesses (`headless-verify.sh`,
+`soak-m4.sh`) remain shell scripts.
 
 ## Building
 
@@ -76,6 +78,8 @@ working on the engine and the paks:
 | `jk2coop dev pk3 coop-npcs <GameData/base>` | `build-coop-npcs-pk3.sh` | Extracts the retail NPC config and repackages it as `zzz-coop-npcs.pk3`. |
 | `jk2coop dev pk3 widescreen` | `build-widescreen-menu-pk3.sh` | Patches the SP video-menu resolution list into `zz-widescreen-menu.pk3`. |
 | `jk2coop dev pk3 sensitivity` | `build-sensitivity-menu-pk3.sh` | Rescales the SP CONTROLS mouse-sensitivity slider into `zz-sensitivity-menu.pk3`. |
+| `jk2coop dev textures upscale` | `upscale-textures.sh` | Real-ESRGAN hi-res override pak from your own retail art (see [hires-textures.md](hires-textures.md)). Model runs in a container; `--stub-upscale` tests the plumbing with no GPU. |
+| `jk2coop dev textures generate` | `generate-textures.sh` | Original non-branded material textures via FLUX.1-schnell (see [asset-generation.md](asset-generation.md)). Model runs in a container; `--dry-run` previews the manifest. |
 | `jk2coop dev gfx …` | — | Low-level graphics-feature toggle (reapply patches → rebuild → reinstall). `jk2coop graphics` is the user-facing wrapper. |
 
 Run any command with `--help` for its flags.
