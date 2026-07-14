@@ -123,16 +123,30 @@ powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1 -Uninstall
 
 ### Optional mods
 
-After the core install the script offers optional game-file mods, each of which
-just adds a `zz…` override pak to `base\` (retail data is never modified, and
-`-Uninstall` removes them too). On an interactive console it prompts **y/N** for
-each; run non-interactively it enables none unless you pass the matching switch.
+Three optional game-file mods each add a `zz…` override pak to `base\` (retail
+data is never modified, and uninstalling removes them too). How you enable them
+depends on which installer you use.
 
-| Mod | Switch | What it does | Availability |
+| Mod | Config key (`[graphics]`) | What it does | Availability |
 |---|---|---|---|
-| Widescreen menu | `-WithWidescreen` | Adds QHD / ultrawide / 4K to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | Works on Windows (built natively in PowerShell from your own retail menus) |
-| Generated textures | `-WithTextures` | Original AI material textures ([asset-generation.md](asset-generation.md)) | Linux GPU-only — the installer prints the command to run on a Linux machine |
-| Upscaled textures | `-WithUpscale` | Real-ESRGAN hi-res override ([hires-textures.md](hires-textures.md)) | Linux GPU-only — prints the command |
+| Widescreen menu | `widescreen` | Adds QHD / ultrawide / 4K to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | Works on Windows (built natively from your own retail menus) |
+| Generated textures | `texture_generate` | Original AI material textures ([asset-generation.md](asset-generation.md)) | Linux GPU-only — the installer prints the command to run on a Linux machine |
+| Upscaled textures | `texture_upscale` | Real-ESRGAN hi-res override ([hires-textures.md](hires-textures.md)) | Linux GPU-only — prints the command |
+
+**With `jk2coop` (recommended)** the mods are config-driven — no per-mod install
+switches. Toggle the key in the `jk2coop graphics` TUI (or edit
+`%AppData%\jk2coop\config.toml`), then run `jk2coop install`, which builds any
+newly-enabled pak and removes any the config no longer wants:
+
+```powershell
+jk2coop graphics    # toggle "Widescreen" / "Texture upscale" / "Texture generate"
+jk2coop install     # builds/removes the override paks to match the config
+```
+
+**With the PowerShell installer** the same mods are per-mod switches. On an
+interactive console it prompts **y/N** for each; run non-interactively it enables
+none unless you pass the matching switch (`-WithWidescreen`, `-WithTextures`,
+`-WithUpscale`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\install-coop.ps1                    # prompts y/N

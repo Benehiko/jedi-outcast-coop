@@ -13,6 +13,14 @@ upscale runs entirely on your machine.
 
 > **This is optional and cosmetic.** It has no effect on co-op or gameplay.
 
+The easiest way to build and install the pak is to let the installer run the
+tool for you: set `texture_upscale = true` under `[graphics]` in your config (or
+toggle **Texture upscale** in the `jk2coop graphics` TUI), then run
+`jk2coop install`. It builds `zzz-hires-textures.pk3` into your `base/` when a
+GPU container is available, and removes it if you later turn the setting off. The
+rest of this document covers running `tools/upscale-textures.sh` directly, which
+you need when tuning scale/model or building on a separate GPU machine.
+
 ## How it works
 
 ```

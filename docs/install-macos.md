@@ -112,16 +112,29 @@ schema.
 
 ### Optional mods
 
-After the core install the script offers optional game-file mods, each of which
-just adds a `zz…` override pak to `base/` (retail data is never modified, and
-`--uninstall` removes them too). On an interactive terminal it prompts **y/N**
-for each; run non-interactively it enables none unless you pass the matching flag.
+Three optional game-file mods each add a `zz…` override pak to `base/` (retail
+data is never modified, and uninstalling removes them too). How you enable them
+depends on which installer you use.
 
-| Mod | Flag | Availability |
+| Mod | Config key (`[graphics]`) | Availability |
 |---|---|---|
-| Widescreen menu | `--with-widescreen` | Works on macOS (needs `python3` — Xcode CLT or `brew install python`) — see [widescreen.md](widescreen.md) |
-| Generated textures | `--with-textures` | Linux GPU-only — the installer prints the command to run on a Linux machine |
-| Upscaled textures | `--with-upscale` | Linux GPU-only — prints the command |
+| Widescreen menu | `widescreen` | Works on macOS (needs `python3` — Xcode CLT or `brew install python`) — see [widescreen.md](widescreen.md) |
+| Generated textures | `texture_generate` | Linux GPU-only — the installer prints the command to run on a Linux machine |
+| Upscaled textures | `texture_upscale` | Linux GPU-only — prints the command |
+
+**With `jk2coop` (recommended)** the mods are config-driven — no per-mod install
+flags. Toggle the key in the `jk2coop graphics` TUI (or edit
+`~/Library/Application Support/jk2coop/config.toml`), then run `jk2coop install`,
+which builds any newly-enabled pak and removes any the config no longer wants:
+
+```sh
+jk2coop graphics    # toggle "Widescreen" / "Texture upscale" / "Texture generate"
+jk2coop install     # builds/removes the override paks to match the config
+```
+
+**With the shell installer** the same mods are per-mod flags. On an interactive
+terminal it prompts **y/N** for each; run non-interactively it enables none
+unless you pass the matching flag:
 
 ```sh
 tools/install-coop-macos.sh                    # prompts y/N per optional mod
