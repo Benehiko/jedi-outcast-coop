@@ -56,7 +56,7 @@ type Graphics struct {
 	// matching character-model lighting boost (patch 0024). Needs rebuild.
 	Lighting bool `toml:"lighting"`
 	// MSAA is the multisample sample count written as r_ext_multisample
-	// (0 = off, else 2/4/8). Applied at next launch; no rebuild.
+	// (0 = off, else 2/4/8/16). Applied at next launch; no rebuild.
 	MSAA int `toml:"msaa"`
 	// ResWidth/ResHeight are the game resolution written as r_customwidth /
 	// r_customheight with r_mode -1. Both 0 means "auto": leave the engine on its
