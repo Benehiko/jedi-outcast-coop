@@ -52,6 +52,24 @@ func TestHighestSupportedOffIsAlwaysOff(t *testing.T) {
 	}
 }
 
+func TestClampMSAAOffIsUnchanged(t *testing.T) {
+	p, dir := noEnginePlatform()
+	usable, changed := ClampMSAA(context.Background(), p, dir, 0)
+	if usable != 0 || changed {
+		t.Errorf("MSAA off must clamp to 0 unchanged; got usable=%d changed=%v", usable, changed)
+	}
+}
+
+func TestClampMSAAKeepsChoiceWhenUnprobeable(t *testing.T) {
+	p, dir := noEnginePlatform()
+	// No engine to probe → keep the user's value and report no change, so an
+	// un-probeable machine is never silently lowered.
+	usable, changed := ClampMSAA(context.Background(), p, dir, 16)
+	if usable != 16 || changed {
+		t.Errorf("unprobeable machine must keep the requested level unchanged; got usable=%d changed=%v", usable, changed)
+	}
+}
+
 func TestContainsAny(t *testing.T) {
 	subs := [][]byte{[]byte("EGL config"), []byte("no display modes")}
 	if !containsAny([]byte("...Couldn't find matching EGL config..."), subs) {
