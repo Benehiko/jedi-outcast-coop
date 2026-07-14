@@ -279,3 +279,122 @@ func TestBuildUpscaledPakStub(t *testing.T) {
 		t.Fatalf("packed wall = %v, want 256x256", img.Bounds())
 	}
 }
+
+func TestCapLongestSide(t *testing.T) {
+	for _, tc := range []struct {
+		w, h, cap, wantW, wantH int
+	}{
+		{4000, 2000, 2048, 2048, 1024}, // long side capped, aspect kept
+		{1000, 4000, 2048, 512, 2048},  // portrait
+		{1024, 1024, 2048, 1024, 1024}, // already within cap: unchanged
+		{4000, 2000, 0, 4000, 2000},    // cap<=0: no-op
+	} {
+		out := CapLongestSide(makeImage(tc.w, tc.h), tc.cap)
+		if out.Bounds().Dx() != tc.wantW || out.Bounds().Dy() != tc.wantH {
+			t.Fatalf("cap %dx%d @%d = %dx%d, want %dx%d",
+				tc.w, tc.h, tc.cap, out.Bounds().Dx(), out.Bounds().Dy(), tc.wantW, tc.wantH)
+		}
+	}
+}
+
+func TestBuildUpscaledPakMaxSize(t *testing.T) {
+	dir := t.TempDir()
+	assets := filepath.Join(dir, "base")
+	if err := os.MkdirAll(assets, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 1024 source, stub 4x = 4096, capped to 2048, already PoT -> stays 2048.
+	makePak(t, filepath.Join(assets, "assets0.pk3"), map[string]*image.NRGBA{
+		"textures/wall.jpg": makeImage(1024, 1024),
+	})
+
+	out := filepath.Join(dir, "zzz-hires-textures.pk3")
+	if _, err := BuildUpscaledPak(context.Background(), UpscaleOptions{
+		AssetsDir: assets,
+		OutPath:   out,
+		Scale:     4,
+		MaxSize:   2048,
+		Stub:      true,
+	}); err != nil {
+		t.Fatalf("BuildUpscaledPak: %v", err)
+	}
+
+	r, err := pk3.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	data, err := r.ReadFile("textures/wall.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := DecodeImage("wall.jpg", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dx() != 2048 || img.Bounds().Dy() != 2048 {
+		t.Fatalf("packed wall = %v, want 2048x2048 (capped)", img.Bounds())
+	}
+}
+
+func TestBuildUpscaledPakChecksumSkip(t *testing.T) {
+	dir := t.TempDir()
+	assets := filepath.Join(dir, "base")
+	if err := os.MkdirAll(assets, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	makePak(t, filepath.Join(assets, "assets0.pk3"), map[string]*image.NRGBA{
+		"textures/wall.jpg": makeImage(96, 96),
+	})
+	out := filepath.Join(dir, "zzz-hires-textures.pk3")
+	opts := UpscaleOptions{AssetsDir: assets, OutPath: out, Scale: 2, Stub: true}
+
+	// First build writes the pak + stamp.
+	res1, err := BuildUpscaledPak(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("build 1: %v", err)
+	}
+	if res1.Skipped {
+		t.Fatal("first build should not be skipped")
+	}
+	if r, _ := pk3.Open(out); r != nil {
+		if !r.Has(upscaleStampName) {
+			t.Fatalf("output pak missing stamp %q", upscaleStampName)
+		}
+		_ = r.Close()
+	}
+
+	// Second build with identical inputs must skip.
+	res2, err := BuildUpscaledPak(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("build 2: %v", err)
+	}
+	if !res2.Skipped {
+		t.Fatal("second build with unchanged inputs should be skipped")
+	}
+	if res2.Textures != 0 {
+		t.Fatalf("skipped build reported %d textures, want 0", res2.Textures)
+	}
+
+	// Force must rebuild despite the matching stamp.
+	res3, err := BuildUpscaledPak(context.Background(), UpscaleOptions{
+		AssetsDir: assets, OutPath: out, Scale: 2, Stub: true, Force: true,
+	})
+	if err != nil {
+		t.Fatalf("build 3 (force): %v", err)
+	}
+	if res3.Skipped {
+		t.Fatal("forced build should not be skipped")
+	}
+
+	// A changed knob (scale) must invalidate the stamp and rebuild.
+	res4, err := BuildUpscaledPak(context.Background(), UpscaleOptions{
+		AssetsDir: assets, OutPath: out, Scale: 4, Stub: true,
+	})
+	if err != nil {
+		t.Fatalf("build 4 (new scale): %v", err)
+	}
+	if res4.Skipped {
+		t.Fatal("build with a changed scale should not be skipped")
+	}
+}

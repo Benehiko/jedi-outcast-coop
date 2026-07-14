@@ -72,6 +72,10 @@ type Graphics struct {
 	// TextureUpscale builds a Real-ESRGAN hi-res override pak from the retail
 	// textures (zzz-hires-textures.pk3). GPU + container gated; no rebuild.
 	TextureUpscale bool `toml:"texture_upscale"`
+	// TextureResolution is the upscale output tier in pixels: the largest side of
+	// each upscaled texture is capped to this. Valid: 1024 (1K), 2048 (2K),
+	// 4096 (4K). 0 means the default (2048). Only meaningful with TextureUpscale.
+	TextureResolution int `toml:"texture_resolution"`
 	// TextureGenerate builds an AI material-texture pak
 	// (zzz-generated-textures.pk3). GPU + container gated; no rebuild.
 	TextureGenerate bool `toml:"texture_generate"`
@@ -79,6 +83,19 @@ type Graphics struct {
 
 // StockBlasterVelocity is the retail primary blaster bolt speed (weapons.h).
 const StockBlasterVelocity = 2300
+
+// Texture upscale output tiers (largest-side pixel cap). The gfx menu and the
+// installer offer these three; DefaultTextureResolution is the out-of-the-box
+// choice.
+const (
+	TextureResolution1K = 1024
+	TextureResolution2K = 2048
+	TextureResolution4K = 4096
+
+	// DefaultTextureResolution is the tier used when none is set (2K: a solid
+	// quality/size balance for retail-sourced textures).
+	DefaultTextureResolution = TextureResolution2K
+)
 
 // Defaults returns the out-of-the-box config. These reproduce the previous
 // flag-driven install's default choices: modern combat feel, the mod's intended
@@ -93,14 +110,15 @@ func Defaults() Config {
 			SkipCutscenes:    false,
 		},
 		Graphics: Graphics{
-			Widescreen:      true,
-			Lighting:        true,
-			MSAA:            0,
-			Fullscreen:      false, // windowed by default; reliable on Wayland
-			ResWidth:        0,     // 0x0 = auto (engine picks; no forced custom mode)
-			ResHeight:       0,
-			TextureUpscale:  false,
-			TextureGenerate: false,
+			Widescreen:        true,
+			Lighting:          true,
+			MSAA:              0,
+			Fullscreen:        false, // windowed by default; reliable on Wayland
+			ResWidth:          0,     // 0x0 = auto (engine picks; no forced custom mode)
+			ResHeight:         0,
+			TextureUpscale:    false,
+			TextureResolution: DefaultTextureResolution,
+			TextureGenerate:   false,
 		},
 	}
 }
