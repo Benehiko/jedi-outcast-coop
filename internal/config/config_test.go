@@ -25,6 +25,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want.Game.AimAssist = true
 	want.Graphics.Widescreen = false
 	want.Graphics.MSAA = 4
+	want.Graphics.ResWidth = 2560
+	want.Graphics.ResHeight = 1440
 	want.Graphics.TextureUpscale = true
 
 	if err := want.SaveTo(path); err != nil {
@@ -135,6 +137,66 @@ func TestAutoexecRenderPreset(t *testing.T) {
 		if !strings.Contains(outOff, want) {
 			t.Errorf("lighting-off autoexec missing %q in:\n%s", want, outOff)
 		}
+	}
+}
+
+func TestAutoexecResolution(t *testing.T) {
+	// A set resolution writes the custom video mode.
+	c := Defaults()
+	c.Graphics.ResWidth = 2560
+	c.Graphics.ResHeight = 1440
+	out := string(c.AutoexecBytes())
+	for _, want := range []string{
+		`seta r_mode "-1"`,
+		`seta r_customwidth "2560"`,
+		`seta r_customheight "1440"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resolution autoexec missing %q in:\n%s", want, out)
+		}
+	}
+
+	// Auto (0x0) writes no custom-mode cvars.
+	auto := Defaults() // ResWidth/ResHeight default to 0
+	outAuto := string(auto.AutoexecBytes())
+	for _, unwanted := range []string{"r_customwidth", "r_customheight", `seta r_mode "-1"`} {
+		if strings.Contains(outAuto, unwanted) {
+			t.Errorf("auto resolution must not write %q in:\n%s", unwanted, outAuto)
+		}
+	}
+}
+
+func TestResolutionRow(t *testing.T) {
+	// Auto with a detected monitor shows the native hint.
+	r := Resolution{}
+	row := NewResolutionRow("Resolution", "", &r, Resolution{W: 1920, H: 1080})
+	if got := row.Display(); got != "auto (1920x1080)" {
+		t.Errorf("auto display = %q, want %q", got, "auto (1920x1080)")
+	}
+	// Cycling right lands on the suggested native mode first (it is added first).
+	row.adjust(+1)
+	if r != (Resolution{W: 1920, H: 1080}) {
+		t.Fatalf("after one step, got %v, want 1920x1080", r)
+	}
+	if got := row.Display(); got != "1920x1080 (native)" {
+		t.Errorf("native display = %q, want %q", got, "1920x1080 (native)")
+	}
+	if !row.changed() {
+		t.Error("row should report changed after adjusting off the initial auto value")
+	}
+
+	// A custom current value that is not in the common list stays selectable.
+	odd := Resolution{W: 1234, H: 567}
+	oddRow := NewResolutionRow("Resolution", "", &odd, Resolution{})
+	oddRow.adjust(-1) // step back to it from wherever the cursor starts
+	found := false
+	for i := 0; i < len(oddRow.choices); i++ {
+		if oddRow.choices[i] == (Resolution{W: 1234, H: 567}) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("custom current resolution must be present in the cycle")
 	}
 }
 
