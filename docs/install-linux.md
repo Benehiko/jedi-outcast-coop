@@ -130,17 +130,35 @@ config with no extra steps.
 
 ### Optional mods
 
-After the core install, the script offers optional game-file mods. Each just
-adds a `zz…` override pak to your `base/` (retail data is never modified, and
-`--uninstall` removes them too). On an interactive terminal it prompts **y/N**
-for each; run non-interactively (piped, CI) it enables none unless you pass the
-matching flag.
+Beyond the core co-op install, three optional game-file mods each add a `zz…`
+override pak to your `base/` (retail data is never modified, and uninstalling
+removes them too). How you enable them depends on which installer you use.
 
-| Mod | Flag | What it does | Needs |
+| Mod | Config key (`[graphics]`) | What it does | Needs |
 |---|---|---|---|
-| Widescreen menu | `--with-widescreen` | Adds QHD / ultrawide / 4K resolutions to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | — |
-| Generated textures | `--with-textures` | Original AI material textures via FLUX (see [asset-generation.md](asset-generation.md)) | GPU + container |
-| Upscaled textures | `--with-upscale` | Real-ESRGAN hi-res override from your own retail art (see [hires-textures.md](hires-textures.md)) | GPU + container |
+| Widescreen menu | `widescreen` | Adds QHD / ultrawide / 4K resolutions to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | — |
+| Generated textures | `texture_generate` | Original AI material textures via FLUX (see [asset-generation.md](asset-generation.md)) | GPU + container |
+| Upscaled textures | `texture_upscale` | Real-ESRGAN hi-res override from your own retail art (see [hires-textures.md](hires-textures.md)) | GPU + container |
+
+**With `jk2coop` (recommended)** the mods are config-driven — there are no
+per-mod install flags. Set the key in `~/.config/jk2coop/config.toml` (or toggle
+it in the `jk2coop graphics` TUI), then run `jk2coop install`, which builds any
+newly-enabled pak and removes any the config no longer wants:
+
+```sh
+jk2coop graphics    # toggle "Widescreen" / "Texture upscale" / "Texture generate"
+jk2coop install     # builds/removes the override paks to match the config
+```
+
+**With the shell installer** the same mods are per-mod flags. On an interactive
+terminal it prompts **y/N** for each; run non-interactively (piped, CI) it
+enables none unless you pass the matching flag:
+
+| Mod | Flag |
+|---|---|
+| Widescreen menu | `--with-widescreen` |
+| Generated textures | `--with-textures` |
+| Upscaled textures | `--with-upscale` |
 
 ```sh
 tools/install-coop.sh                       # prompts y/N for each optional mod
