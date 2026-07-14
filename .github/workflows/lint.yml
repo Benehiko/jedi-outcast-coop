@@ -21,7 +21,7 @@ jobs:
     name: shellcheck (tools/)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # koalaman/shellcheck ships as a static binary in the runner image's
       # package repo; no external action needed.
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with OpenJK submodule)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 

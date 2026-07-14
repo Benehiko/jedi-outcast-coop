@@ -26,9 +26,9 @@ jobs:
           - { goos: darwin,  goarch: arm64 }
           - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.5'
           cache: true
@@ -61,14 +61,14 @@ jobs:
           fi
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jk2coop-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.tar.gz
           if-no-files-found: ignore
 
       - name: Upload build artifact (zip)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jk2coop-${{ matrix.goos }}-${{ matrix.goarch }}-zip
           path: dist/*.zip
@@ -82,11 +82,11 @@ jobs:
     steps:
       # Full history is needed to diff this tag against the previous one for the
       # commit-message changelog.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -124,7 +124,7 @@ jobs:
           cat CHANGELOG.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*.tar.gz
