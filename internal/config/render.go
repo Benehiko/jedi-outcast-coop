@@ -121,6 +121,24 @@ func (c Config) GPUPaks() (upscale, generate bool) {
 	return c.Graphics.TextureUpscale, c.Graphics.TextureGenerate
 }
 
+// UpscaleTier maps the configured texture resolution to the Real-ESRGAN neural
+// scale factor and the largest-side pixel cap applied afterwards. An unset or
+// unrecognised value falls back to the 2K tier.
+//
+//	1K -> 2x neural, cap 1024
+//	2K -> 4x neural, cap 2048
+//	4K -> 4x neural, cap 4096
+func (c Config) UpscaleTier() (scale, maxSize int) {
+	switch c.Graphics.TextureResolution {
+	case TextureResolution1K:
+		return 2, TextureResolution1K
+	case TextureResolution4K:
+		return 4, TextureResolution4K
+	default: // TextureResolution2K and any unset/unknown value
+		return 4, TextureResolution2K
+	}
+}
+
 func seta(cvar, val string) string {
 	return fmt.Sprintf("seta %s %q\n", cvar, val)
 }

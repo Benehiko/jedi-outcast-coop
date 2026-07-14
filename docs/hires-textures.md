@@ -19,7 +19,34 @@ toggle **Texture upscale** in the `jk2coop graphics` TUI), then run
 `jk2coop install`. It builds `zzz-hires-textures.pk3` into your `base/` when a
 GPU container is available, and removes it if you later turn the setting off. The
 rest of this document covers running `jk2coop dev textures upscale` directly,
-which you need when tuning scale/model or building on a separate GPU machine.
+which you need when tuning resolution/model or building on a separate GPU machine.
+
+### Output resolution (1K / 2K / 4K)
+
+The upscale output tier is configurable. Set `texture_resolution` under
+`[graphics]` (or the **Upscale resolution** row in the `jk2coop graphics` TUI) to
+one of:
+
+| Tier | `texture_resolution` | Neural factor | Longest-side cap |
+|---|---|---|---|
+| 1K | `1024` | 2× | 1024 px |
+| 2K (default) | `2048` | 4× | 2048 px |
+| 4K | `4096` | 4× | 4096 px |
+
+The neural pass runs at the listed integer factor (Real-ESRGAN only does 2× or
+4×); each texture's longest side is then capped to the tier so the pak stays a
+predictable size. **1K is the only tier that is genuinely faster** — it runs the
+neural model at 2× instead of 4×, so it produces a quarter of the pixels. 2K and
+4K both run the model at 4×; 4K keeps the full result while 2K adds one cheap
+downscale, so 2K is *not* faster than 4K, only smaller on disk.
+
+### Rebuilds are skipped when nothing changed
+
+The output pak records a fingerprint of its inputs (your retail paks plus the
+resolution/model/scale settings). On a later `jk2coop install` — or a re-run of
+the command — an up-to-date pak is left untouched instead of being regenerated,
+so the slow neural pass only runs when something actually changed. Pass
+`--force` to rebuild anyway.
 
 ## How it works
 
@@ -31,7 +58,8 @@ retail assets*.pk3
         │  (2) Real-ESRGAN upscale (2x or 4x), locally, GPU if available
         ▼
   upscaled PNGs
-        │  (3) snap to power-of-two, restore original path + extension
+        │  (3) cap to the resolution tier, snap to power-of-two,
+        │      restore original path + extension
         ▼
 zzz-hires-textures.pk3   ──►  drop in base/, engine loads it over the originals
 ```
@@ -106,20 +134,26 @@ A user-supplied `--image` is used as-is and never rebuilt.
 ## Usage
 
 ```sh
-# default: 4x, photographic model, reads the platform base dir,
+# default: 2K tier, photographic model, reads the platform base dir,
 # writes zzz-hires-textures.pk3 next to your assets.
 jk2coop dev textures upscale
 
 # a quick trial on 40 textures first (cheap — only those are extracted):
 jk2coop dev textures upscale --limit 40
 
-# 2x (smaller, faster) with a specific assets dir and output path:
-jk2coop dev textures upscale --scale 2 \
+# 1K (smaller, and the fastest tier) with a specific assets dir and output path:
+jk2coop dev textures upscale --resolution 1024 \
   --assets "/path/to/GameData/base" \
   --out    "/path/to/GameData/base/zzz-hires-textures.pk3"
 
+# 4K, the sharpest and largest:
+jk2coop dev textures upscale --resolution 4096
+
 # stylised/painted look instead of photographic:
 jk2coop dev textures upscale --model realesr-animevideov3
+
+# rebuild even though the existing pak already matches the inputs:
+jk2coop dev textures upscale --force
 
 # force CPU (no GPU) or pick a runtime:
 jk2coop dev textures upscale --cpu --runtime podman
@@ -131,7 +165,9 @@ Key options (`--help` lists them all):
 |---|---|
 | `--assets DIR` | Where your retail `assets*.pk3` live (default: the platform base dir). |
 | `--out FILE` | Output pak (default `<assets>/zzz-hires-textures.pk3`). |
-| `--scale 2\|4` | Upscale factor. `4` is sharper but far larger and slower. |
+| `--resolution 1024\|2048\|4096` | Output tier (1K/2K/4K). Sets the neural factor and the longest-side cap (default `2048`). |
+| `--scale 2\|4` | Advanced: override the Real-ESRGAN neural factor the tier implies. |
+| `--force` | Rebuild even when the existing pak already matches the current inputs. |
 | `--model NAME` | `realesrgan-x4plus` (default) or `realesr-animevideov3`. |
 | `--limit N` | Process only the first N textures — a fast trial. |
 | `--image IMG` | Real-ESRGAN container image. |

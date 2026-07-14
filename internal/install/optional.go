@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/paks"
+	"github.com/Benehiko/jedi-outcast-coop/internal/progress"
 	"github.com/Benehiko/jedi-outcast-coop/internal/textures"
 )
 
@@ -78,12 +79,21 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 		upPak := filepath.Join(baseDir, "zzz-hires-textures.pk3")
 		assetsBase := filepath.Join(gamedata, "base")
 		if textures.GPUAvailable() {
-			opts.sayf("Upscaling retail textures with Real-ESRGAN (this can take a while)…")
-			_, err := textures.BuildUpscaledPak(ctx, textures.UpscaleOptions{
+			scale, maxSize := cfg.UpscaleTier()
+			opts.sayf("Upscaling retail textures with Real-ESRGAN at %dK (this can take a while)…", maxSize/1024)
+			pb := progress.New(opts.Out, "  ")
+			res, err := textures.BuildUpscaledPak(ctx, textures.UpscaleOptions{
 				AssetsDir: assetsBase,
 				OutPath:   upPak,
-				Progress:  func(s string) { opts.infof("%s", s) },
+				Scale:     scale,
+				MaxSize:   maxSize,
+				Progress: func(s string) {
+					pb.Done() // close any open bar line before a status line
+					opts.infof("%s", s)
+				},
+				ProgressBar: pb.Update,
 			})
+			pb.Done()
 			if err != nil {
 				opts.warnf("texture upscale failed — zzz-hires-textures.pk3 not installed",
 					err.Error(),
@@ -91,7 +101,11 @@ func installOptionalMods(ctx context.Context, man *Manifest, opts *Options, game
 					fmt.Sprintf("re-run by hand: jk2coop dev textures upscale --assets '%s' --out '%s'", assetsBase, upPak))
 			} else {
 				_ = man.Add(upPak)
-				opts.infof("installed zzz-hires-textures.pk3")
+				if res.Skipped {
+					opts.infof("zzz-hires-textures.pk3 already up to date — skipped upscale")
+				} else {
+					opts.infof("installed zzz-hires-textures.pk3")
+				}
 			}
 		} else {
 			opts.infof("no GPU container runtime detected (need nerdctl/podman + /dev/kfd).")

@@ -156,6 +156,7 @@ widescreen = true        # patch-backed (needs rebuild to change)
 lighting = true          # render-fidelity patch (needs rebuild)
 msaa = 0                 # r_ext_multisample: 0/2/4/8 (runtime cvar)
 texture_upscale = false  # GPU pak
+texture_resolution = 2048 # upscale tier: 1024 (1K) / 2048 (2K) / 4096 (4K)
 texture_generate = false # GPU pak
 ```
 
@@ -175,7 +176,7 @@ removes them too). How you enable them depends on which installer you use.
 |---|---|---|---|
 | Widescreen menu | `widescreen` | Adds QHD / ultrawide / 4K resolutions to **SETUP → VIDEO → Video Mode** (see [widescreen.md](widescreen.md)) | — |
 | Generated textures | `texture_generate` | Original AI material textures via FLUX (see [asset-generation.md](asset-generation.md)) | GPU + container |
-| Upscaled textures | `texture_upscale` | Real-ESRGAN hi-res override from your own retail art (see [hires-textures.md](hires-textures.md)) | GPU + container |
+| Upscaled textures | `texture_upscale` | Real-ESRGAN hi-res override from your own retail art at the `texture_resolution` tier (1K/2K/4K; see [hires-textures.md](hires-textures.md)). Skipped on re-install when nothing changed. | GPU + container |
 
 **With `jk2coop` (recommended)** the mods are config-driven — there are no
 per-mod install flags. Set the key in `~/.config/jk2coop/config.toml` (or toggle

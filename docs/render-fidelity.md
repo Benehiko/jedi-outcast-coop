@@ -228,8 +228,9 @@ diffuse texture is the substitute for surface detail**. This project ships
 two optional, opt-in texture mods that build override paks from *your own*
 retail data (retail files are never modified):
 
-- **Upscale** (`[graphics] texture_upscale`) — Real-ESRGAN hi-res override of
-  your retail textures. See [hires-textures.md](hires-textures.md).
+- **Upscale** (`[graphics] texture_upscale`, tier `texture_resolution`) —
+  Real-ESRGAN hi-res override of your retail textures at 1K/2K/4K. See
+  [hires-textures.md](hires-textures.md).
 - **Textures** (`[graphics] texture_generate`) — AI-generated material textures.
   See [asset-generation.md](asset-generation.md).
 

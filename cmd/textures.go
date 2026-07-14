@@ -7,9 +7,27 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Benehiko/jedi-outcast-coop/internal/config"
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
+	"github.com/Benehiko/jedi-outcast-coop/internal/progress"
 	"github.com/Benehiko/jedi-outcast-coop/internal/textures"
 )
+
+// upscaleTier maps a resolution-tier pixel value (1024/2048/4096) to the
+// Real-ESRGAN neural scale factor and the largest-side output cap, matching
+// config.Config.UpscaleTier. An unset (0) value uses the default tier.
+func upscaleTier(resolution int) (scale, maxSize int, err error) {
+	switch resolution {
+	case 0:
+		resolution = config.DefaultTextureResolution
+	case config.TextureResolution1K, config.TextureResolution2K, config.TextureResolution4K:
+		// valid
+	default:
+		return 0, 0, fmt.Errorf("resolution must be 1024, 2048 or 4096 (got %d)", resolution)
+	}
+	scale, maxSize = config.Config{Graphics: config.Graphics{TextureResolution: resolution}}.UpscaleTier()
+	return scale, maxSize, nil
+}
 
 func newTexturesCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -23,8 +41,8 @@ func newTexturesCmd() *cobra.Command {
 func newTexturesUpscaleCmd() *cobra.Command {
 	var (
 		assets, out, model, image, runtimeName string
-		scale, limit                           int
-		forceCPU, stub                         bool
+		scale, limit, resolution               int
+		forceCPU, stub, force                  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "upscale",
@@ -41,22 +59,44 @@ func newTexturesUpscaleCmd() *cobra.Command {
 			if out == "" {
 				out = filepath.Join(assets, "zzz-hires-textures.pk3")
 			}
+			// The resolution tier drives the neural scale and the output cap; an
+			// explicit --scale still overrides the scale the tier implies.
+			tierScale, maxSize, err := upscaleTier(resolution)
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("scale") {
+				scale = tierScale
+			}
+			pb := progress.New(cmd.OutOrStdout(), "  ")
 			res, err := textures.BuildUpscaledPak(cmd.Context(), textures.UpscaleOptions{
 				AssetsDir: assets,
 				OutPath:   out,
 				Scale:     scale,
+				MaxSize:   maxSize,
 				Model:     model,
 				Image:     image,
 				Runtime:   runtimeName,
 				Limit:     limit,
 				ForceCPU:  forceCPU,
 				Stub:      stub,
-				Progress:  func(s string) { cmd.Printf(">>> %s\n", s) },
+				Force:     force,
+				Progress: func(s string) {
+					pb.Done() // close any open bar line before a status line
+					cmd.Printf(">>> %s\n", s)
+				},
+				ProgressBar: pb.Update,
 			})
+			pb.Done()
 			if err != nil {
 				return err
 			}
 			cmd.Println()
+			if res.Skipped {
+				cmd.Printf(">>> up to date. %s (%s) already matches the current inputs — nothing to rebuild.\n", res.OutPath, humanBytes(res.Bytes))
+				cmd.Println("    Pass --force to rebuild anyway.")
+				return nil
+			}
 			cmd.Printf(">>> done. wrote %s (%s, %d textures)\n", res.OutPath, humanBytes(res.Bytes), res.Textures)
 			cmd.Println("    The engine loads this pak on top of your retail assets automatically.")
 			cmd.Printf("    To remove: rm %q\n", res.OutPath)
@@ -65,7 +105,9 @@ func newTexturesUpscaleCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&assets, "assets", "", "directory with your retail assets*.pk3 (default: platform base dir)")
 	cmd.Flags().StringVar(&out, "out", "", "output pak (default: <assets>/zzz-hires-textures.pk3)")
-	cmd.Flags().IntVar(&scale, "scale", 4, "upscale factor: 2 or 4")
+	cmd.Flags().IntVar(&resolution, "resolution", config.DefaultTextureResolution, "output resolution tier in pixels: 1024 (1K), 2048 (2K) or 4096 (4K)")
+	cmd.Flags().IntVar(&scale, "scale", 4, "advanced: Real-ESRGAN neural factor (2 or 4); overrides the tier's default")
+	cmd.Flags().BoolVar(&force, "force", false, "rebuild even if the existing pak already matches the current inputs")
 	cmd.Flags().StringVar(&model, "model", textures.DefaultUpscaleModel, "Real-ESRGAN model (realesrgan-x4plus or realesr-animevideov3)")
 	cmd.Flags().StringVar(&image, "image", "", "container image providing realesrgan-ncnn-vulkan (default: built-in)")
 	cmd.Flags().StringVar(&runtimeName, "runtime", "", "container runtime: nerdctl or podman (default: autodetect)")

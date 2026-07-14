@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/pk3"
 )
@@ -30,6 +32,11 @@ type UpscaleOptions struct {
 	OutPath string
 	// Scale is the upscale factor, 2 or 4 (default 4).
 	Scale int
+	// MaxSize, when >0, caps the largest side of each output texture to this many
+	// pixels (before the power-of-two snap): a texture larger than MaxSize on its
+	// long axis is proportionally downscaled first. 0 = no cap (keep the full
+	// Scale× result). Lets callers offer 1K/2K/4K output tiers.
+	MaxSize int
 	// Model is the Real-ESRGAN model name (default DefaultUpscaleModel).
 	Model string
 	// Image is the container image (default DefaultUpscaleImage).
@@ -43,11 +50,18 @@ type UpscaleOptions struct {
 	// Stub replaces the neural pass with a plain Catmull-Rom resize (no
 	// container). Exercises the whole extract→PoT→pack pipeline for CI/dev.
 	Stub bool
+	// Force rebuilds even when an existing output pak's fingerprint already
+	// matches the current inputs (which would otherwise be skipped).
+	Force bool
 	// WorkDir, when set, is used as the scratch dir (kept by the caller);
 	// empty creates and removes a temp dir.
 	WorkDir string
 	// Progress, when non-nil, receives human-readable status lines.
 	Progress func(string)
+	// ProgressBar, when non-nil, receives per-phase progress counts (phase name,
+	// items done, total). Callers render an in-place bar; total may be 0 for an
+	// indeterminate phase. Called repeatedly for the same phase as work advances.
+	ProgressBar func(phase string, done, total int)
 }
 
 // UpscaleResult reports what BuildUpscaledPak produced.
@@ -55,6 +69,9 @@ type UpscaleResult struct {
 	OutPath  string
 	Textures int   // hi-res textures packed
 	Bytes    int64 // size of the output pak
+	// Skipped is true when an up-to-date output pak already existed and the slow
+	// pipeline was not re-run. Textures is 0 in that case (nothing repacked).
+	Skipped bool
 }
 
 // texEntry is one texture to process: its pak-relative path and the pak it
@@ -67,6 +84,12 @@ type texEntry struct {
 func (o *UpscaleOptions) progress(format string, a ...any) {
 	if o.Progress != nil {
 		o.Progress(fmt.Sprintf(format, a...))
+	}
+}
+
+func (o *UpscaleOptions) bar(phase string, done, total int) {
+	if o.ProgressBar != nil {
+		o.ProgressBar(phase, done, total)
 	}
 }
 
@@ -130,6 +153,24 @@ func BuildUpscaledPak(ctx context.Context, opts UpscaleOptions) (*UpscaleResult,
 	}
 	opts.progress("found %d retail pak(s) in %s", len(paks), opts.AssetsDir)
 
+	// Checksum short-circuit: if an output pak already exists and its recorded
+	// fingerprint matches the current inputs (paks + pipeline knobs), the slow
+	// neural upscale would reproduce byte-for-byte the same result — skip it.
+	want, err := upscaleFingerprint(paks, opts)
+	if err != nil {
+		return nil, err
+	}
+	if !opts.Force {
+		if got := readUpscaleStamp(opts.OutPath); got != "" && got == want {
+			fi, err := os.Stat(opts.OutPath)
+			if err != nil {
+				return nil, err
+			}
+			opts.progress("output pak is already up to date — skipping upscale (use --force to rebuild)")
+			return &UpscaleResult{OutPath: opts.OutPath, Bytes: fi.Size(), Skipped: true}, nil
+		}
+	}
+
 	// Scratch layout.
 	work := opts.WorkDir
 	cleanup := func() {}
@@ -170,7 +211,9 @@ func BuildUpscaledPak(ctx context.Context, opts UpscaleOptions) (*UpscaleResult,
 	//    step 4 can restore it.
 	opts.progress("normalising %d textures to PNG…", len(entries))
 	origExt := make(map[string]string, len(entries)) // relStem -> original ext
-	if err := extractAndNormalise(paks, entries, inDir, origExt); err != nil {
+	if err := extractAndNormalise(paks, entries, inDir, origExt, func(done int) {
+		opts.bar("normalise", done, len(entries))
+	}); err != nil {
 		return nil, err
 	}
 	if len(origExt) == 0 {
@@ -195,7 +238,9 @@ func BuildUpscaledPak(ctx context.Context, opts UpscaleOptions) (*UpscaleResult,
 	opts.progress("snapping to power-of-two and restoring original formats…")
 	builder := pk3.NewBuilder()
 	potDir := filepath.Join(work, "pot")
-	count, err := snapAndCollect(upDir, potDir, origExt, builder)
+	count, err := snapAndCollect(upDir, potDir, origExt, opts.MaxSize, builder, func(done int) {
+		opts.bar("snap", done, len(origExt))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +248,13 @@ func BuildUpscaledPak(ctx context.Context, opts UpscaleOptions) (*UpscaleResult,
 		return nil, fmt.Errorf("power-of-two snap produced no files")
 	}
 	opts.progress("prepared %d hi-res textures", count)
+
+	// Embed the fingerprint so a later run can skip an unchanged rebuild.
+	stampPath := filepath.Join(work, "upscale-stamp")
+	if err := os.WriteFile(stampPath, []byte(want), 0o644); err != nil {
+		return nil, err
+	}
+	builder.Add(upscaleStampName, stampPath)
 
 	opts.progress("packing override pak → %s", opts.OutPath)
 	if err := builder.Write(opts.OutPath); err != nil {
@@ -245,12 +297,13 @@ func indexTextures(paks []string) ([]texEntry, error) {
 // extractAndNormalise reads each entry from its resolved pak, decodes it, and
 // writes a PNG under inDir at the entry's relative path with a .png extension.
 // origExt records relStem -> original extension for the format-restore step.
-func extractAndNormalise(paks []string, entries []texEntry, inDir string, origExt map[string]string) error {
+func extractAndNormalise(paks []string, entries []texEntry, inDir string, origExt map[string]string, onProgress func(done int)) error {
 	// Group entries by source pak to open each pak once.
 	byPak := make(map[string][]string)
 	for _, e := range entries {
 		byPak[e.pak] = append(byPak[e.pak], e.name)
 	}
+	done := 0
 	for _, pak := range paks {
 		names := byPak[pak]
 		if len(names) == 0 {
@@ -261,6 +314,10 @@ func extractAndNormalise(paks []string, entries []texEntry, inDir string, origEx
 			return err
 		}
 		for _, name := range names {
+			done++
+			if onProgress != nil {
+				onProgress(done)
+			}
 			data, err := r.ReadFile(name)
 			if err != nil {
 				continue // skip unreadable member
@@ -317,7 +374,7 @@ func stubUpscale(inDir, upDir string, scale int) error {
 // snapAndCollect walks the upscaled PNGs, snaps each to power-of-two, restores
 // the original extension/format (from origExt), writes it under potDir, and
 // registers it with the pak builder. Returns the count packed.
-func snapAndCollect(upDir, potDir string, origExt map[string]string, builder *pk3.Builder) (int, error) {
+func snapAndCollect(upDir, potDir string, origExt map[string]string, maxSize int, builder *pk3.Builder, onProgress func(done int)) (int, error) {
 	count := 0
 	err := filepath.WalkDir(upDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -335,11 +392,14 @@ func snapAndCollect(upDir, potDir string, origExt map[string]string, builder *pk
 		if !ok {
 			return nil // no known original for this output; skip
 		}
+		if onProgress != nil {
+			onProgress(count + 1)
+		}
 		img, err := DecodeFile(path)
 		if err != nil {
 			return err
 		}
-		snapped := SnapToPowerOfTwo(img)
+		snapped := SnapToPowerOfTwo(CapLongestSide(img, maxSize))
 		archivePath := stem + "." + ext
 		out := filepath.Join(potDir, filepath.FromSlash(archivePath))
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
@@ -410,11 +470,52 @@ func runUpscaleContainer(ctx context.Context, rt Runtime, opts UpscaleOptions, i
 	} else {
 		opts.progress("running Real-ESRGAN on CPU (no GPU passthrough) — this is slow")
 	}
-	if err := run.Run(ctx); err != nil {
-		return err
+	// The container is one opaque batch call; realesrgan-ncnn-vulkan prints no
+	// machine-readable progress. It does, however, write each output PNG as it
+	// finishes, so poll flatOut for the produced count to drive a live bar.
+	total := len(flatToRel)
+	opts.bar("upscale", 0, total)
+	stopPoll := make(chan struct{})
+	var pollWG sync.WaitGroup
+	if opts.ProgressBar != nil {
+		pollWG.Go(func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopPoll:
+					return
+				case <-ticker.C:
+					opts.bar("upscale", countPNGs(flatOut), total)
+				}
+			}
+		})
 	}
+	runErr := run.Run(ctx)
+	close(stopPoll)
+	pollWG.Wait()
+	if runErr != nil {
+		return runErr
+	}
+	opts.bar("upscale", total, total)
 
 	return unflattenTree(flatOut, upDir, flatToRel)
+}
+
+// countPNGs returns the number of .png files directly in dir (non-recursive);
+// used to poll the flat upscaler output for live progress. Errors yield 0.
+func countPNGs(dir string) int {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range ents {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".png") {
+			n++
+		}
+	}
+	return n
 }
 
 // flattenTree copies every .png under srcDir (at any depth) into a single flat

@@ -248,6 +248,32 @@ func TestGPUPaks(t *testing.T) {
 	}
 }
 
+func TestUpscaleTier(t *testing.T) {
+	for _, tc := range []struct {
+		res, wantScale, wantMax int
+	}{
+		{TextureResolution1K, 2, 1024},
+		{TextureResolution2K, 4, 2048},
+		{TextureResolution4K, 4, 4096},
+		{0, 4, 2048},   // unset -> default (2K)
+		{999, 4, 2048}, // unknown -> default (2K)
+	} {
+		c := Defaults()
+		c.Graphics.TextureResolution = tc.res
+		scale, maxSize := c.UpscaleTier()
+		if scale != tc.wantScale || maxSize != tc.wantMax {
+			t.Fatalf("UpscaleTier(res=%d) = (%d,%d), want (%d,%d)",
+				tc.res, scale, maxSize, tc.wantScale, tc.wantMax)
+		}
+	}
+}
+
+func TestDefaultTextureResolution(t *testing.T) {
+	if got := Defaults().Graphics.TextureResolution; got != DefaultTextureResolution {
+		t.Fatalf("default TextureResolution = %d, want %d", got, DefaultTextureResolution)
+	}
+}
+
 func TestFormatFloat(t *testing.T) {
 	for _, tc := range []struct {
 		in   float64

@@ -110,6 +110,25 @@ func Resize(img image.Image, w, h int) image.Image {
 	return dst
 }
 
+// CapLongestSide proportionally downscales img so its longest side is at most
+// maxSize pixels. maxSize <= 0, or an image already within the cap, returns the
+// image unchanged. Used to realise the 1K/2K/4K upscale output tiers on top of
+// Real-ESRGAN's fixed integer scale factor.
+func CapLongestSide(img image.Image, maxSize int) image.Image {
+	if maxSize <= 0 {
+		return img
+	}
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	longest := max(w, h)
+	if longest <= maxSize {
+		return img
+	}
+	scale := float64(maxSize) / float64(longest)
+	nw := max(1, int(float64(w)*scale))
+	nh := max(1, int(float64(h)*scale))
+	return Resize(img, nw, nh)
+}
+
 // SnapToPowerOfTwo scales img so both dimensions are powers of two, the
 // constraint the engine's renderer enforces (it FATALs on non-power-of-two
 // textures). Each axis is snapped up to the next power of two independently.
