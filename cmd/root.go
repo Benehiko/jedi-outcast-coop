@@ -27,6 +27,7 @@ func newRootCmd() *cobra.Command {
 			"  jk2coop join <IP>          join a co-op game by IP\n" +
 			"  jk2coop game               Game Settings (mouse, blaster, aim)\n" +
 			"  jk2coop graphics           Graphics Settings (widescreen, MSAA, …)\n" +
+			"  jk2coop vee                manage vee + the build VM (engine compiler)\n" +
 			"  jk2coop uninstall          remove everything jk2coop installed",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -40,6 +41,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newJoinCmd())
 	root.AddCommand(newGameCmd())
 	root.AddCommand(newGraphicsCmd())
+	root.AddCommand(newVeeCmd())
 	root.AddCommand(newUninstallCmd())
 
 	root.AddCommand(newVersionCmd())

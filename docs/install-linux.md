@@ -46,13 +46,21 @@ make build            # produces ./jk2coop
 
 `setup` extracts the embedded OpenJK source into a work directory
 (`~/.cache/jk2coop`), applies the co-op patches (in pure Go — no `git` needed),
-builds the engine, and installs. If the build tools (`cmake`, `ninja`, a C
-compiler) are missing it prints the exact install command for your distro
-(apt / pacman / dnf) and stops so you can install them and re-run. If you have
-[`vee`](https://github.com/Benehiko/vee), `setup` can instead build the engine
-inside a clean throwaway VM, so you never install a compiler on the host — it
-prompts, or force the choice with `--vm` / `--host`. After a VM build it offers
-to delete the VM (kept by default for fast rebuilds).
+builds the engine, and installs. **By default the build runs inside a clean
+throwaway VM** managed by [`vee`](https://github.com/Benehiko/vee), so you never
+install a compiler on the host. If `vee` is not already on your `PATH`, `setup`
+downloads a pinned, checksum-verified copy into `~/.config/jk2coop/bin` and keeps
+it for later rebuilds — the only first-time requirement is a network connection.
+After the build it offers to delete the VM (kept by default for fast rebuilds).
+See [build-vm.md](build-vm.md) for the full story and `jk2coop vee` for managing
+it.
+
+To build directly on this machine instead, pass `--host` (needs `cmake`,
+`ninja`, and a C compiler; if they are missing `setup` prints the exact install
+command for your distro — apt / pacman / dnf — and stops so you can install them
+and re-run). Use `--vm` for a plain (non-container) VM build. If `vee` cannot be
+obtained and no toolchain is present, `setup` guides you to install one or the
+other.
 
 The manual steps 1–2 below build from the OpenJK **submodule** instead of the
 embedded source. They are the reference for **patch development**; a normal

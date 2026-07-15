@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+
+	veepkg "github.com/Benehiko/jedi-outcast-coop/internal/vee"
 )
 
 // VMName is the fixed name of the docker-build VM. Reusing one name lets a
@@ -21,22 +23,33 @@ const (
 	guestMount  = "/mnt/jk2coop"
 )
 
-// lookPath and execCommand are indirected for testing.
+// execCommand and veeResolve are indirected for testing.
 var (
-	lookPath    = exec.LookPath
 	execCommand = exec.CommandContext
+	veeResolve  = veepkg.Resolve
 )
 
-// Available reports whether the `vee` tool is on PATH (a precondition for the
-// docker build path — the host needs no Docker of its own, only vee).
+// Available reports whether vee is present (on PATH or downloaded into the
+// jk2coop config dir) — a precondition for the docker build path, since the host
+// needs no Docker of its own, only vee.
 func Available() bool {
-	_, err := lookPath("vee")
-	return err == nil
+	_, ok := veeResolve()
+	return ok
+}
+
+// veeBin resolves the vee binary path (PATH first, then the managed config-dir
+// copy). Callers reach the docker path only after Available() / vee.Ensure, so a
+// missing binary here is a logic error surfaced as a clear command failure.
+func veeBin() string {
+	if p, ok := veeResolve(); ok {
+		return p
+	}
+	return "vee"
 }
 
 // vee runs `vee <args…>`, streaming combined output to out.
 func vee(ctx context.Context, out io.Writer, args ...string) error {
-	cmd := execCommand(ctx, "vee", args...)
+	cmd := execCommand(ctx, veeBin(), args...)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("vee %s: %w", args[0], err)
@@ -62,7 +75,7 @@ func veeCreate(ctx context.Context, shareDir string, out io.Writer) error {
 
 // vmExists reports whether a VM named VMName is already registered with vee.
 func vmExists(ctx context.Context) bool {
-	cmd := execCommand(ctx, "vee", "list")
+	cmd := execCommand(ctx, veeBin(), "list")
 	b, err := cmd.Output()
 	if err != nil {
 		return false

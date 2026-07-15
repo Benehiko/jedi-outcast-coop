@@ -22,6 +22,7 @@ import (
 
 	"github.com/Benehiko/jedi-outcast-coop/internal/gfx"
 	"github.com/Benehiko/jedi-outcast-coop/internal/prereq"
+	veepkg "github.com/Benehiko/jedi-outcast-coop/internal/vee"
 )
 
 // VMName is the fixed name of the build VM. Reusing one name lets a re-run reuse
@@ -35,14 +36,23 @@ const (
 	guestMount  = "/mnt/jk2coop"
 )
 
-// lookPath is indirected for testing.
-var lookPath = exec.LookPath
+// veeResolve is indirected for testing.
+var veeResolve = veepkg.Resolve
 
-// Available reports whether the `vee` tool is on PATH (a precondition for any VM
-// build path).
+// Available reports whether vee is present (on PATH or downloaded into the
+// jk2coop config dir) — a precondition for any VM build path.
 func Available() bool {
-	_, err := lookPath("vee")
-	return err == nil
+	_, ok := veeResolve()
+	return ok
+}
+
+// veeBin resolves the vee binary path (PATH first, then the managed config-dir
+// copy), falling back to the bare name so a command failure is legible.
+func veeBin() string {
+	if p, ok := veeResolve(); ok {
+		return p
+	}
+	return "vee"
 }
 
 // Build creates (or reuses) the build VM with shareDir shared over virtiofs,
@@ -93,7 +103,7 @@ func create(ctx context.Context, repoRoot string, out io.Writer) error {
 
 // vmExists reports whether a VM named VMName is already registered with vee.
 func vmExists(ctx context.Context) bool {
-	cmd := exec.CommandContext(ctx, "vee", "list")
+	cmd := exec.CommandContext(ctx, veeBin(), "list")
 	b, err := cmd.Output()
 	if err != nil {
 		return false
@@ -109,7 +119,7 @@ func vmExists(ctx context.Context) bool {
 
 // run executes `vee <args…>`, streaming combined output to out.
 func run(ctx context.Context, out io.Writer, args ...string) error {
-	cmd := exec.CommandContext(ctx, "vee", args...)
+	cmd := exec.CommandContext(ctx, veeBin(), args...)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("vee %s: %w", args[0], err)

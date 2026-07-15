@@ -73,11 +73,18 @@ clone nor the submodule — download the binary and run:
 
 `setup` extracts the embedded OpenJK source into a work directory
 (`~/.cache/jk2coop`), applies the co-op patches, builds the engine, and
-installs — all in one step, with no git and no network. If the build
-toolchain (cmake, ninja, a C compiler) is missing, it prints the exact
-command to install it for your OS, or — if you have
-[`vee`](https://github.com/Benehiko/vee) — offers to build inside a clean
-throwaway VM so you never install a compiler at all.
+installs — all in one step, with no git. **By default it builds inside a
+throwaway VM** managed by [`vee`](https://github.com/Benehiko/vee), so you
+install **neither a C/C++ compiler nor Docker** on your machine. If `vee`
+is not already installed, `setup` downloads a pinned, checksum-verified
+copy into the config dir (`~/.config/jk2coop/bin`) and keeps it there for
+later rebuilds. Pass `--host` to build on this machine instead (needs the
+cmake/ninja/compiler toolchain).
+
+The VM is kept between runs so a rebuild reuses it. See
+[docs/build-vm.md](docs/build-vm.md) for exactly what the vee/VM setup
+does, and manage it with `jk2coop vee` (`vee status`, `vee download`,
+`vee vm delete`).
 
 Building `jk2coop` yourself from a clone works too:
 
@@ -100,8 +107,9 @@ The individual commands, once built ([docs/building.md](docs/building.md)):
     jk2coop join <host-ip>             # join a co-op game from another machine
     jk2coop uninstall                  # remove everything it installed
 
-There are eight user-facing commands: `setup`, `install`, `launch`,
-`host`, `join`, `game`, `graphics` (alias `gfx`), and `uninstall`. The
+There are nine user-facing commands: `setup`, `install`, `launch`,
+`host`, `join`, `game`, `graphics` (alias `gfx`), `vee`, and
+`uninstall`. The
 same cross-platform `jk2coop` Go binary is the recommended path on Linux,
 macOS, and Windows, with pre-built binaries on every release. See
 [docs/tooling.md](docs/tooling.md). The `tools/*.sh` scripts remain and
