@@ -51,7 +51,7 @@ persistently.
 
 ## Commands
 
-There are exactly seven user-facing commands, plus `version` and a hidden
+There are exactly eight user-facing commands, plus `version` and a hidden
 `dev` group for the low-level build steps:
 
 | Command | What it does |
@@ -62,6 +62,7 @@ There are exactly seven user-facing commands, plus `version` and a hidden
 | `jk2coop join <IP[:PORT]>` | Joins a co-op game by IP (a positional argument). |
 | `jk2coop game` | Game Settings TUI — mouse sensitivity, blaster speed, aim assist, dynamic crosshair, skip cutscenes. All runtime cvars, no rebuild. |
 | `jk2coop graphics` (alias `gfx`) | Graphics Settings TUI — widescreen, lighting, resolution, MSAA, texture upscale, texture generate. Widescreen and lighting are patch-backed and offer a rebuild on change; resolution, MSAA and the texture paks are not. Resolution auto-suggests the monitor's current mode. |
+| `jk2coop vee` | Manages `vee` and the throwaway build VM used to compile the engine. `vee status` shows where vee lives and whether a build VM exists; `vee download` fetches jk2coop's pinned, checksum-verified vee into `~/.config/jk2coop/bin`; `vee vm delete` removes the build VM (the next build recreates it). See [build-vm.md](build-vm.md). |
 | `jk2coop uninstall` | Removes exactly what the install created (manifest-tracked). |
 | `jk2coop version` | Prints version, commit, and build date. |
 

@@ -22,15 +22,20 @@ make build            # produces ./jk2coop
 
 **By default it builds in a container inside a throwaway VM** (via
 [`vee`](https://github.com/Benehiko/vee)), so you install **neither a C/C++
-toolchain nor Docker** on the host — the only prerequisite is `vee` itself. See
+toolchain nor Docker** on the host. If `vee` is not already on your `PATH`,
+`setup` downloads a pinned, checksum-verified copy into the config dir
+(`~/.config/jk2coop/bin`) and keeps it for later rebuilds — so the only true
+prerequisite is a network connection the first time. See
 [§ Building in a container (`--docker`)](#building-in-a-container---docker)
-below. Override the default with:
+below, and [build-vm.md](build-vm.md) for the whole vee/VM story and how to
+manage it with `jk2coop vee`. Override the default with:
 
 - `--host` — build on this machine (needs the cmake/ninja/compiler toolchain;
   `setup` prints the exact install command if it is missing);
 - `--vm` — build in a plain VM (no container) via vee.
 
-When `vee` is not installed, `setup` falls back to a host build.
+When `vee` cannot be obtained (no network, unsupported platform) and is not
+installed, `setup` falls back to a host build.
 
 By default `setup` builds from the **source embedded in the binary**, extracted
 to `~/.cache/jk2coop` — see [embedded-source.md](embedded-source.md). The manual
@@ -132,7 +137,10 @@ What happens under the hood:
    automatically — there is no copy-out step.
 
 The VM is kept after a successful build (a re-run reuses the warm VM and its
-cached image); `setup` offers to delete it, or run `vee delete jk2coop-docker`.
+cached image); `setup` offers to delete it, or run `jk2coop vee vm delete` (or
+`vee delete jk2coop-docker`). If `vee` is not already installed, `setup`
+downloads a pinned, checksum-verified copy into `~/.config/jk2coop/bin` first.
+See [build-vm.md](build-vm.md) for the full vee/VM lifecycle and `jk2coop vee`.
 
 ### Target matrix
 

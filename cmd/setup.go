@@ -16,6 +16,7 @@ import (
 	"github.com/Benehiko/jedi-outcast-coop/internal/install"
 	"github.com/Benehiko/jedi-outcast-coop/internal/prereq"
 	"github.com/Benehiko/jedi-outcast-coop/internal/project"
+	veepkg "github.com/Benehiko/jedi-outcast-coop/internal/vee"
 	"github.com/Benehiko/jedi-outcast-coop/internal/vmbuild"
 	"github.com/Benehiko/jedi-outcast-coop/internal/workdir"
 )
@@ -48,10 +49,14 @@ func newSetupCmd() *cobra.Command {
 			"  3. build the engine — by default in a container inside a throwaway\n" +
 			"     VM (via `vee`), so you install no compiler and no Docker\n" +
 			"  4. install (stage assets, launchers, and your settings)\n\n" +
-			"By default the build runs in a container in a vee VM (--docker), which\n" +
-			"needs only `vee` on PATH. Pass --host to build on this machine (needs\n" +
-			"the cmake/ninja/compiler toolchain) or --vm for a plain VM build. When\n" +
-			"vee is not installed, setup falls back to a host build.",
+			"By default the build runs in a container in a vee VM (--docker), so you\n" +
+			"install no compiler and no Docker. If `vee` is not already on PATH, setup\n" +
+			"downloads a pinned, checksum-verified copy into the config dir\n" +
+			"(~/.config/jk2coop/bin) and keeps it for later rebuilds. Manage the vee/VM\n" +
+			"machinery with `jk2coop vee`.\n\n" +
+			"Pass --host to build on this machine (needs the cmake/ninja/compiler\n" +
+			"toolchain) or --vm for a plain VM build. When vee cannot be obtained,\n" +
+			"setup falls back to a host build.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := exclusiveBuildFlags(useVM, useHost, useDocker); err != nil {
@@ -245,20 +250,39 @@ func exclusiveBuildFlags(useVM, useHost, useDocker bool) error {
 
 // chooseBuildMethod decides where to build, gathering the live host state (vee
 // availability, missing toolchain) and delegating the pure decision to
-// decideBuildMethod. On a host-fallback with a present toolchain it prints a
-// hint that installing vee would enable the default container build.
+// decideBuildMethod. Unless the user forced --host, it first tries to make vee
+// available — using an existing install or downloading jk2coop's own managed
+// copy from GitHub releases — so the default container build works with no host
+// toolchain. The downloaded vee is kept under the config dir for later rebuilds.
 func chooseBuildMethod(cmd *cobra.Command, useVM, useHost, useDocker bool) (buildMethod, error) {
-	veeAvail := dockerbuild.Available() // vee powers both the docker and vm paths
+	out := cmd.OutOrStdout()
+	veeAvail := ensureVee(cmd, useHost)
 	toolMissing := len(prereq.Missing()) > 0
 	method, err := decideBuildMethod(useVM, useHost, useDocker, veeAvail, toolMissing)
 	if err != nil {
 		return buildHost, err
 	}
 	if method == buildHost && !useHost && !veeAvail && !toolMissing {
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(),
-			"vee not found; building on this machine (install vee for the default container build).")
+		_, _ = fmt.Fprintln(out,
+			"vee unavailable; building on this machine (install vee for the default container build).")
 	}
 	return method, nil
+}
+
+// ensureVee reports whether vee is usable, downloading jk2coop's managed copy
+// when none is present. It never downloads for an explicit --host build (no vee
+// needed) and treats a download failure as "vee unavailable" (a warning, not a
+// fatal error) so setup can still fall back to a host build.
+func ensureVee(cmd *cobra.Command, useHost bool) bool {
+	if useHost {
+		return false // host build needs no vee; skip the network entirely
+	}
+	out := cmd.OutOrStdout()
+	if _, err := veepkg.Ensure(cmd.Context(), out); err != nil {
+		_, _ = fmt.Fprintf(out, "Could not obtain vee automatically: %v\n", err)
+		return false
+	}
+	return true
 }
 
 // decideBuildMethod is the pure build-method decision. Explicit flags win. With
