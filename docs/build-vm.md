@@ -98,3 +98,41 @@ build; answering "no" (the default) keeps it for faster rebuilds.
 To remove everything jk2coop installed on the host, use `jk2coop uninstall`. To
 remove the downloaded vee and the work dir, delete `~/.config/jk2coop/bin` and
 `~/.cache/jk2coop` (and `jk2coop vee vm delete` first to drop the VM).
+
+## Limitation: the VM build does not work inside another VM (nesting)
+
+The `--docker` and `--vm` paths run the build inside a hardware-accelerated VM.
+That acceleration is the guest hypervisor of whatever machine runs `jk2coop`:
+KVM on Linux, Hypervisor.framework on macOS, and the Windows Hypervisor Platform
+(WHPX) on Windows. **On a real (bare-metal) host this works.** It does *not*
+work when `jk2coop` is itself running inside a virtual machine — a nested setup.
+
+The failure is specific and worth recording, because the symptom is opaque:
+
+- On a **Windows guest** (Windows running as a VM, e.g. under KVM/QEMU), WHPX
+  starts the inner build VM but cannot deliver interrupts to it. QEMU reports
+  `whpx: injection failed … lost (c0350005)` followed by
+  `WHPX: Unexpected VP exit code 4` (an unrecoverable exception), and the inner
+  VM dies shortly after its Docker daemon comes up.
+
+**Root cause — and why it is not fixable in jk2coop, vee, or QEMU.** `c0350005`
+is `WHV_E_UNKNOWN_CAPABILITY`: WHPX is telling QEMU that the APIC / interrupt
+virtualization capability it needs simply does not exist in that environment.
+It is missing because the *outer* hypervisor (the L0 — e.g. KVM) does not expose
+hardware APIC virtualization (APICv / virtual-interrupt-delivery /
+posted-interrupts) *across the nested boundary* to the L1 Windows guest. KVM does
+not implement nested APIC virtualization, and there is no toggle for it — not in
+Windows (no setting or registry edit can conjure a CPU capability the layer below
+did not present), not in WHPX, and not in QEMU (which sends structurally correct
+requests that the platform rejects). Any VM needing interrupt delivery — that is,
+effectively any real VM — hits this; it is not specific to the Alpine build image.
+
+**What to do instead when running under a VM:** build with `--host` inside the
+guest (install the toolchain: Visual Studio + CMake on Windows, or cmake/ninja/
+compiler on Linux), or fetch a prebuilt engine from a CI run. See
+[building.md](building.md) and [install-windows.md](install-windows.md).
+
+(The two vee bugs uncovered while diagnosing this — a WHPX `kernel-irqchip`
+default and a duplicate SSH port-forward in the docker template — were real,
+affect bare-metal Windows too, and are fixed upstream in vee. Only the interrupt
+delivery limitation above is inherent to nesting.)
