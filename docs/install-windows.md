@@ -57,6 +57,12 @@ for how the container path works and its target matrix, [build-vm.md](build-vm.m
 for managing the vee/VM setup (`jk2coop vee`), and the MSVC path above is still
 the reference for patch development and what CI uses.
 
+> **If this Windows machine is itself a virtual machine**, the default
+> container/VM build cannot run — a VM cannot hardware-accelerate another VM
+> nested inside it (WHPX fails to deliver interrupts to the inner build VM). Use
+> `jk2coop setup --host` with Visual Studio + CMake instead, or fetch a CI
+> artifact. See [build-vm.md](build-vm.md#limitation-the-vm-build-does-not-work-inside-another-vm-nesting).
+
 To build the engine from the OpenJK **submodule** by hand instead (patch
 development), see [embedded-source.md](embedded-source.md) and:
 
