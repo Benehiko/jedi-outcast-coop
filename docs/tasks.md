@@ -472,14 +472,29 @@ task. Every task keeps the solo loopback regression green.
   Done: kejim_post intro cutscene freezes + letterboxes joiners, releases
   cleanly; no joiner can roam mid-cutscene.
 
-- [ ] **F4 — level transition follow.**
-  Needs: F1 landed (investigate any time).
-  Do: establish what happens to joiners when the host completes a level
-  (`target_level_change` → `SV_SpawnServer`); make the standard
-  new-gamestate → reload → re-enter flow work, and re-run the patch-0008
-  spawn ring on the new map.
-  Done: host finishes kejim_post; every joiner loads the next map and
-  spawns clear without manual reconnect.
+- [x] **F4 — level transition follow. DONE (patches 0027 + 0028).**
+  Two distinct problems were found and fixed:
+  1. *Remote client crashed on transition* (patch 0027, `code/client/cl_parse.cpp`).
+     `CL_ParseGamestate` cleared client state but never flushed the renderer, so
+     a joiner receiving a new-map gamestate re-ran `RE_LoadWorldMap` while
+     `tr.worldMapLoaded` was still set from the old map — the renderer aborted
+     with "attempted to redundantly load world map" and the joiner dropped. The
+     host avoids this via `CL_MapLoading → CL_FlushMemory`. Fix: call
+     `CL_FlushMemory()` in `CL_ParseGamestate` when `cls.rendererStarted` — this
+     fires only for the remote-client transition (the host already flushed, so
+     its `rendererStarted` is false; a first connect has no renderer yet).
+  2. *Joiner carry-over* (patch 0028, `code/server/sv_ccmds.cpp` +
+     `codeJK2/game/g_client.cpp`). Stock `SV_Player_EndOfLevelSave` only saved
+     client 0 into the single `playersave`/`playerammo`/`playerinv`/`playerfplvl`
+     cvar set. Now it loops every connected slot into per-slot suffixed cvars
+     (`playersave1`, …; slot 0 keeps the bare names so retail SP is unchanged),
+     and `Player_RestoreFromPrevLevel` reads its own slot. Joiners carry
+     weapons/health/ammo/force across a transition, gated by the same
+     KEEP_PREV / load-transition condition as the host.
+  (The joiner also already survives a same-map reload / mission-fail respawn via
+  the patch-0004 `SV_SpawnServer` client-preserve loop.)
+  Done + verified headless (PTY-driven kejim_post → kejim_base): both players
+  re-enter the new map, zero redundant-load errors, `playersave1` populated.
 
 - [ ] **F5 — verification: harness + live session.**
   Needs: F1–F4.

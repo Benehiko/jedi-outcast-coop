@@ -1,0 +1,25 @@
+diff --git a/code/client/cl_parse.cpp b/code/client/cl_parse.cpp
+--- a/code/client/cl_parse.cpp
++++ b/code/client/cl_parse.cpp
+@@ -390,6 +390,21 @@
+ 
+ 	UI_UpdateConnectionString( "" );
+ 
++	// co-op dual-load: a remote client that is already in a map and receives a
++	// fresh gamestate (a level transition / mission reload on the host) must tear
++	// down its renderer world and cgame before loading the new one. Otherwise the
++	// cgame re-init calls RE_LoadWorldMap while tr.worldMapLoaded is still set from
++	// the old map and the renderer aborts with "attempted to redundantly load world
++	// map" (tr_bsp.cpp), dropping the joiner. The host reaches this same teardown
++	// via CL_MapLoading -> CL_FlushMemory (driven from SV_SpawnServer), which leaves
++	// cls.rendererStarted false by the time it parses its own gamestate; so gating
++	// on rendererStarted here fires only for the remote client and never double-
++	// flushes the host. On the very first connect the renderer isn't started yet,
++	// so this is skipped and connect behaves exactly as before.
++	if ( cls.rendererStarted ) {
++		CL_FlushMemory();
++	}
++
+ 	// wipe local client state
+ 	CL_ClearState();
+ 
