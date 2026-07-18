@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	veepkg "github.com/Benehiko/jedi-outcast-coop/internal/vee"
 )
@@ -23,10 +24,13 @@ const (
 	guestMount  = "/mnt/jk2coop"
 )
 
-// execCommand and veeResolve are indirected for testing.
+// execCommand, veeResolve and runGuestPrep are indirected for testing.
 var (
 	execCommand = exec.CommandContext
 	veeResolve  = veepkg.Resolve
+	// runGuestPrep runs the guest-prep script once over ssh. Indirected so the
+	// retry loop in prepareGuest can be tested without a real VM.
+	runGuestPrep = veeSSH
 )
 
 // Available reports whether vee is present (on PATH or downloaded into the
@@ -98,19 +102,61 @@ func veeSSH(ctx context.Context, out io.Writer, script string) error {
 	return vee(ctx, out, "ssh", VMName, "--", remote)
 }
 
-// prepareGuest mounts the virtiofs share and ensures dockerd is running inside
-// the guest. The vee docker template installs Docker via cloud-init but does not
-// reliably leave it running (the boot-time `service docker start` races the
-// package install), so we (re)start it and the caller then waits on /_ping.
-func prepareGuest(ctx context.Context, out io.Writer) error {
-	script := strings.Join([]string{
+// guestPrepScript is the shell run inside the guest to mount the virtiofs share
+// and ensure dockerd is running. It is idempotent: mounting is guarded by
+// mountpoint, and docker is only (re)started when not already up, so re-running
+// it after a partial setup is safe.
+func guestPrepScript() string {
+	return strings.Join([]string{
 		"set -eu",
 		"doas mkdir -p " + guestMount,
 		"mountpoint -q " + guestMount + " || doas mount -t virtiofs " + virtiofsTag + " " + guestMount,
 		// Start dockerd if the API socket is not already up.
 		"doas rc-service docker status >/dev/null 2>&1 || doas rc-service docker start",
 	}, "\n")
-	return veeSSH(ctx, out, script)
+}
+
+// guestPrepTimeout bounds how long we retry the guest-prep SSH while the freshly
+// booted guest's sshd is not yet accepting connections. guestPrepInterval is the
+// gap between attempts. Both are vars so tests can shrink them.
+var (
+	guestPrepTimeout  = 90 * time.Second
+	guestPrepInterval = 3 * time.Second
+)
+
+// prepareGuest mounts the virtiofs share and ensures dockerd is running inside
+// the guest. The vee docker template installs Docker via cloud-init but does not
+// reliably leave it running (the boot-time `service docker start` races the
+// package install), so we (re)start it and the caller then waits on /_ping.
+//
+// A just-created/started VM's sshd is not immediately accepting connections, so
+// the first `vee ssh` often fails with "connection reset by peer" (exit 255).
+// The prep script is idempotent, so we retry it on transient failures until it
+// succeeds or the deadline passes — otherwise a boot-time race would abort setup
+// even though the VM is healthy and the daemon comes up moments later.
+func prepareGuest(ctx context.Context, out io.Writer) error {
+	script := guestPrepScript()
+	waitCtx, cancel := context.WithTimeout(ctx, guestPrepTimeout)
+	defer cancel()
+
+	var lastErr error
+	for {
+		// Buffer this attempt's output so a failed (retried) attempt does not spew
+		// ssh reset noise; only the succeeding attempt's output reaches the user.
+		var buf strings.Builder
+		if err := runGuestPrep(waitCtx, &buf, script); err == nil {
+			_, _ = io.WriteString(out, buf.String())
+			return nil
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("guest not reachable over ssh within %s: %w", guestPrepTimeout, lastErr)
+		case <-time.After(guestPrepInterval):
+			_, _ = fmt.Fprint(out, ".")
+		}
+	}
 }
 
 // Delete removes the build VM and its disks. Callers offer this as a prompt
