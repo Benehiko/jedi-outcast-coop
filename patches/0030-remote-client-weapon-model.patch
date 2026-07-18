@@ -1,0 +1,85 @@
+diff --git a/codeJK2/cgame/cg_players.cpp b/codeJK2/cgame/cg_players.cpp
+--- a/codeJK2/cgame/cg_players.cpp
++++ b/codeJK2/cgame/cg_players.cpp
+@@ -1203,6 +1203,71 @@
+ 
+ /*
+ ===============
++CG_RemoteAttachWeaponModel
++
++co-op dual-load: attach the third-person weapon ghoul2 to a networked player on
++the remote client. The host builds this in its server sim on every weapon change
++(G_CreateG2AttachedWeaponModel, bolted to handRBolt) so the character appears
++holding its gun; a serverless remote client never runs that, so networked players
++render empty-handed. Rebuild it here from the networked currentState.weapon when
++it changes. G_CreateG2AttachedWeaponModel is self-contained (only gi.G2API_* +
++the gent's own ghoul2/handRBolt/playerModel — no server-sim globals), so it is
++safe to call from the client, unlike the animation setters. No-op on the host.
++===============
++*/
++extern void G_CreateG2AttachedWeaponModel( gentity_t *ent, const char *psWeaponModel );
++
++static void CG_RemoteAttachWeaponModel( centity_t *cent )
++{
++	if ( !cg_remoteClient )
++	{
++		return;
++	}
++
++	gentity_t *gent = cent->gent;
++	if ( !gent || !gent->client )
++	{
++		return;
++	}
++	if ( gent->playerModel == -1 || gent->handRBolt == -1 )
++	{
++		return;	// player model / hand bolt not built yet
++	}
++
++	const int netWeapon = cent->currentState.weapon;
++
++	// Attach at most ONCE per weapon value. We track the last weapon we ATTEMPTED
++	// (not the last that succeeded) in ps.weapon so a failed/absent model never
++	// retries — retrying every frame re-runs G2API_InitGhoul2Model + model registration
++	// each frame, which stalls the client so badly its connection times out. ps.weapon
++	// is otherwise unused on the serverless remote sim. Initialised to WP_NONE at spawn,
++	// so first sight of any weapon (incl. WP_NONE) attempts exactly once.
++	if ( gent->client->ps.weapon == netWeapon )
++	{
++		return;
++	}
++	gent->client->ps.weapon = netWeapon;	// mark attempted BEFORE the (possibly failing) call
++
++	if ( netWeapon <= WP_NONE || netWeapon >= WP_NUM_WEAPONS )
++	{
++		return;
++	}
++	if ( netWeapon == WP_SABER )
++	{//saber uses the client's saber model, like the host path
++		if ( gent->client->ps.saberModel[0] )
++		{
++			G_CreateG2AttachedWeaponModel( gent, gent->client->ps.saberModel );
++		}
++		return;
++	}
++	if ( weaponData[netWeapon].weaponMdl[0] )
++	{
++		G_CreateG2AttachedWeaponModel( gent, weaponData[netWeapon].weaponMdl );
++	}
++}
++
++/*
++===============
+ CG_PlayerAnimation
+ ===============
+ */
+@@ -5171,6 +5236,9 @@
+ 		// below (the host does this in its server sim via PM_SetAnim). Without it the
+ 		// skeleton never plays and the player/NPC renders frozen in the bind pose.
+ 		CG_RemoteDriveGhoul2Anim( cent );
++		// ...and attach the third-person weapon model from the networked weapon, or
++		// the character renders empty-handed (host builds this in its server sim).
++		CG_RemoteAttachWeaponModel( cent );
+ 
+ 		//FIXME: if at all possible, do all our sets before our gets to do only *1* G2 skeleton transform per render frame
+ 		CG_SetGhoul2Info(&ent, cent);
