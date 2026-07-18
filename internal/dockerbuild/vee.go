@@ -24,6 +24,13 @@ const (
 	guestMount  = "/mnt/jk2coop"
 )
 
+// guestUser is the login user inside the docker-template VM. The vee docker
+// template is Alpine and provisions the ssh key onto Alpine's cloud-init
+// default user "alpine". vee's `ssh` otherwise defaults the login to the host
+// $USER, which does not exist in the guest — so every `vee ssh` must pass
+// `--user alpine` explicitly or auth fails with "Permission denied (publickey)".
+const guestUser = "alpine"
+
 // execCommand, veeResolve and runGuestPrep are indirected for testing.
 var (
 	execCommand = exec.CommandContext
@@ -61,35 +68,61 @@ func vee(ctx context.Context, out io.Writer, args ...string) error {
 	return nil
 }
 
-// veeCreate starts the VM if it exists, otherwise creates the docker-template VM
-// with shareDir shared over virtiofs. `vee create` would wipe a warm VM, so we
-// only create when absent.
+// veeCreate ensures the docker-build VM is up:
+//   - already running   → nothing to do (a warm re-run reuses it);
+//   - exists but stopped → start it;
+//   - absent            → create the docker-template VM with shareDir shared.
+//
+// `vee create` would wipe a warm VM and `vee start` errors on an
+// already-running one, so both are guarded — keeping setup idempotent across
+// re-runs.
 func veeCreate(ctx context.Context, shareDir string, out io.Writer) error {
-	if vmExists(ctx) {
+	switch vmState(ctx) {
+	case vmRunning:
+		return nil
+	case vmStopped:
 		return vee(ctx, out, "start", VMName)
+	default:
+		return vee(ctx, out,
+			"create", VMName,
+			"--template", "docker",
+			"--headless",
+			"--virtiofs-dir", shareDir,
+			"--virtiofs-tag", virtiofsTag,
+		)
 	}
-	return vee(ctx, out,
-		"create", VMName,
-		"--template", "docker",
-		"--headless",
-		"--virtiofs-dir", shareDir,
-		"--virtiofs-tag", virtiofsTag,
-	)
 }
 
-// vmExists reports whether a VM named VMName is already registered with vee.
-func vmExists(ctx context.Context) bool {
+// vmStateKind is the registration/run state of the build VM as seen by vee.
+type vmStateKind int
+
+const (
+	vmAbsent  vmStateKind = iota // not registered with vee
+	vmStopped                    // registered but not running
+	vmRunning                    // registered and running
+)
+
+// vmState reports whether VMName is absent, stopped, or running by parsing
+// `vee list`. A row for VMName whose fields include "running" is running; any
+// other row for VMName is stopped; no row is absent. A failed list is treated
+// as absent so the caller falls through to create.
+func vmState(ctx context.Context) vmStateKind {
 	cmd := execCommand(ctx, veeBin(), "list")
 	b, err := cmd.Output()
 	if err != nil {
-		return false
+		return vmAbsent
 	}
 	for line := range strings.SplitSeq(string(b), "\n") {
-		if slices.Contains(strings.Fields(line), VMName) {
-			return true
+		fields := strings.Fields(line)
+		if !slices.Contains(fields, VMName) {
+			continue
 		}
+		if slices.Contains(fields, "running") {
+			return vmRunning
+		}
+		return vmStopped
 	}
-	return false
+	return vmAbsent
 }
 
 // veeSSH runs a script inside the guest over `vee ssh`. Everything after `--`
@@ -99,7 +132,7 @@ func vmExists(ctx context.Context) bool {
 func veeSSH(ctx context.Context, out io.Writer, script string) error {
 	enc := base64.StdEncoding.EncodeToString([]byte(script))
 	remote := "echo " + enc + " | base64 -d | sh"
-	return vee(ctx, out, "ssh", VMName, "--", remote)
+	return vee(ctx, out, "ssh", VMName, "--user", guestUser, "--", remote)
 }
 
 // guestPrepScript is the shell run inside the guest to mount the virtiofs share
@@ -159,9 +192,24 @@ func prepareGuest(ctx context.Context, out io.Writer) error {
 	}
 }
 
-// Delete removes the build VM and its disks. Callers offer this as a prompt
-// after a successful build; keeping the VM speeds up re-runs.
+// Delete removes the build VM, its disks, and runtime state (backups are kept
+// by vee). Callers offer this as a prompt after a successful build; keeping the
+// VM speeds up re-runs.
+//
+// vee has two sharp edges here: `vee delete` takes no confirmation flag (an
+// unknown --yes aborts it), and it silently no-ops on a *running* VM — it prints
+// usage and exits 0 without deleting anything. So we stop a running VM first,
+// then delete. Absent is a no-op.
 func Delete(ctx context.Context, out io.Writer) error {
+	switch vmState(ctx) {
+	case vmAbsent:
+		_, _ = fmt.Fprintf(out, "Build VM %q already gone; nothing to delete.\n", VMName)
+		return nil
+	case vmRunning:
+		if err := vee(ctx, out, "stop", VMName); err != nil {
+			return err
+		}
+	}
 	_, _ = fmt.Fprintf(out, "Deleting build VM %q…\n", VMName)
-	return vee(ctx, out, "delete", VMName, "--yes")
+	return vee(ctx, out, "delete", VMName)
 }
