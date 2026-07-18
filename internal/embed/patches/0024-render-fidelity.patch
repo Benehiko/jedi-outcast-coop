@@ -1,6 +1,106 @@
 --- a/code/rd-vanilla/tr_image.cpp
 +++ b/code/rd-vanilla/tr_image.cpp
-@@ -1408,14 +1408,25 @@
+@@ -33,6 +33,19 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
+ 
+ static byte			 s_intensitytable[256];
+ static unsigned char s_gammatable[256];
++// coop render fidelity: gamma correction WITHOUT the overbright << shift. The
++// software-overbright texture path (R_LightScaleTexture) applies the overbright
++// brightening separately and hue-preservingly, so it needs the un-shifted gamma
++// so it doesn't double-apply the shift. s_gammatable keeps the shift baked in for
++// the hardware-gamma ramp (WIN_SetGamma), which brightens the whole framebuffer
++// at display and so can't distort per-texel hue.
++static unsigned char s_gammatableNoOB[256];
++// coop render fidelity: the overbright brightness factor (1 << overbrightBits) as
++// a float, set by R_SetColorMappings. The software texture path scales RGB by
++// this uniformly and caps at 255 by the brightest channel (see R_OverbrightTexel)
++// so a saturated texel keeps its hue instead of the brightest channel clamping
++// first and shifting the colour (e.g. flesh reading green when red clamps).
++static float s_overbrightScale = 1.0f;
+ 
+ int		gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
+ int		gl_filter_max = GL_LINEAR;
+@@ -341,6 +354,46 @@ void R_ImageList_f( void ) {
+ //=======================================================================
+ 
+ 
++/*
++================
++R_OverbrightTexel
++
++coop render fidelity: apply the software-overbright brightening to one RGB texel
++while preserving its hue. The classic path bakes the overbright << shift into the
++per-channel gamma table, which clamps each channel at 255 independently: on a
++saturated texel the brightest channel hits the ceiling first while the others keep
++climbing, shifting the colour ratio — bright flesh (red-dominant) reads green when
++red clamps and green does not. Instead, scale all three channels by the same
++s_overbrightScale and, if that would push the brightest channel past 255, scale the
++whole texel down by that brightest channel so it caps at 255 with its exact hue.
++The small brightness the roll-off gives up on saturated texels is the correct
++trade for not painting a colour cast onto skin. p points at an RGBA texel; alpha
++(p[3]) is left untouched.
++================
++*/
++static inline void R_OverbrightTexel( byte *p )
++{
++	float r = p[0] * s_overbrightScale;
++	float g = p[1] * s_overbrightScale;
++	float b = p[2] * s_overbrightScale;
++
++	float m = r;
++	if ( g > m ) m = g;
++	if ( b > m ) m = b;
++
++	if ( m > 255.0f )
++	{
++		const float scale = 255.0f / m;
++		r *= scale;
++		g *= scale;
++		b *= scale;
++	}
++
++	p[0] = (byte)( r + 0.5f );
++	p[1] = (byte)( g + 0.5f );
++	p[2] = (byte)( b + 0.5f );
++}
++
+ /*
+ ================
+ R_LightScaleTexture
+@@ -363,9 +416,13 @@ static void R_LightScaleTexture (unsigned *in, int inwidth, int inheight, qboole
+ 			c = inwidth*inheight;
+ 			for (i=0 ; i<c ; i++, p+=4)
+ 			{
+-				p[0] = s_gammatable[p[0]];
+-				p[1] = s_gammatable[p[1]];
+-				p[2] = s_gammatable[p[2]];
++				// coop render fidelity: pure gamma per channel, then the overbright
++				// brightening applied hue-preservingly across RGB (see the header
++				// comment on s_gammatableNoOB / R_OverbrightTexel).
++				p[0] = s_gammatableNoOB[p[0]];
++				p[1] = s_gammatableNoOB[p[1]];
++				p[2] = s_gammatableNoOB[p[2]];
++				R_OverbrightTexel( p );
+ 			}
+ 		}
+ 	}
+@@ -391,9 +448,12 @@ static void R_LightScaleTexture (unsigned *in, int inwidth, int inheight, qboole
+ 		{
+ 			for (i=0 ; i<c ; i++, p+=4)
+ 			{
+-				p[0] = s_gammatable[s_intensitytable[p[0]]];
+-				p[1] = s_gammatable[s_intensitytable[p[1]]];
+-				p[2] = s_gammatable[s_intensitytable[p[2]]];
++				// coop render fidelity: intensity + pure gamma per channel, then the
++				// overbright brightening applied hue-preservingly across RGB.
++				p[0] = s_gammatableNoOB[s_intensitytable[p[0]]];
++				p[1] = s_gammatableNoOB[s_intensitytable[p[1]]];
++				p[2] = s_gammatableNoOB[s_intensitytable[p[2]]];
++				R_OverbrightTexel( p );
+ 			}
+ 		}
+ 	}
+@@ -1408,14 +1468,25 @@ void R_SetColorMappings( void ) {
  
  	// setup the overbright lighting
  	tr.overbrightBits = r_overBrightBits->integer;
@@ -32,9 +132,37 @@
  	}
  
  	if ( tr.overbrightBits > 1 ) {
+@@ -1443,12 +1514,27 @@ void R_SetColorMappings( void ) {
+ 
+ 	shift = tr.overbrightBits;
+ 
++	// coop render fidelity: the overbright factor the software texture path applies
++	// hue-preservingly (see R_OverbrightTexel). 1 << shift, so shift 0 -> 1.0 (no-op).
++	s_overbrightScale = (float)( 1 << shift );
++
+ 	for ( i = 0; i < 256; i++ ) {
+ 		if ( g == 1 ) {
+ 			inf = i;
+ 		} else {
+ 			inf = 255 * pow ( i/255.0f, 1.0f / g ) + 0.5f;
+ 		}
++		// Pure-gamma table (no overbright shift) for the software texture path,
++		// which applies the shift separately and hue-preservingly.
++		int infNoOB = inf;
++		if ( infNoOB < 0 ) {
++			infNoOB = 0;
++		}
++		if ( infNoOB > 255 ) {
++			infNoOB = 255;
++		}
++		s_gammatableNoOB[i] = infNoOB;
++
+ 		inf <<= shift;
+ 		if (inf < 0) {
+ 			inf = 0;
 --- a/code/rd-vanilla/tr_init.cpp
 +++ b/code/rd-vanilla/tr_init.cpp
-@@ -137,6 +137,7 @@
+@@ -137,6 +137,7 @@ cvar_t	*r_subdivisions;
  cvar_t	*r_lodCurveError;
  
  cvar_t	*r_overBrightBits;
@@ -42,7 +170,7 @@
  cvar_t	*r_mapOverBrightBits;
  
  cvar_t	*r_debugSurface;
-@@ -1539,6 +1540,17 @@
+@@ -1539,6 +1540,17 @@ void R_Register( void )
  	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
  	r_texturebitslm = ri.Cvar_Get( "r_texturebitslm", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
  	r_overBrightBits = ri.Cvar_Get ("r_overBrightBits", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
@@ -62,7 +190,7 @@
  	r_vertexLight = ri.Cvar_Get( "r_vertexLight", "0", CVAR_ARCHIVE | CVAR_LATCH );
 --- a/code/rd-vanilla/tr_light.cpp
 +++ b/code/rd-vanilla/tr_light.cpp
-@@ -447,10 +447,29 @@
+@@ -447,10 +447,29 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
  		VectorMA( lightDir, d, dir, lightDir );
  	}
  
@@ -96,7 +224,7 @@
  
 --- a/code/rd-vanilla/tr_local.h
 +++ b/code/rd-vanilla/tr_local.h
-@@ -1206,6 +1206,7 @@
+@@ -1206,6 +1206,7 @@ extern	cvar_t	*r_skipBackEnd;
  extern	cvar_t	*r_ignoreGLErrors;
  
  extern	cvar_t	*r_overBrightBits;
