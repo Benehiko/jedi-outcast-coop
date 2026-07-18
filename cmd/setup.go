@@ -217,6 +217,17 @@ func embedCoopUI(wd workdir.Dir) error {
 	return embedpkg.ExtractCoopUI(wd.Root)
 }
 
+// embedBlasterFX extracts the baked-in blaster impact-FX source into the work
+// dir so the installer can build zz-blaster-fx.pk3 from it. ExtractBlasterFX
+// strips the embed root, so passing wd.BlasterFX() lands the effects/ tree at
+// wd.BlasterFX()/effects — exactly where install.BuildBlasterFX looks.
+func embedBlasterFX(wd workdir.Dir) error {
+	if err := os.MkdirAll(wd.BlasterFX(), 0o755); err != nil {
+		return err
+	}
+	return embedpkg.ExtractBlasterFX(wd.BlasterFX())
+}
+
 // ensureSubmodule initialises the OpenJK submodule when it is not yet a git
 // checkout, fixing the most common fresh-clone mistake (forgetting
 // --recurse-submodules) instead of failing later.

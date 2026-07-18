@@ -89,3 +89,35 @@ func TestCoopUIBuildsFromEmbedded(t *testing.T) {
 		t.Fatalf("built pak missing or empty: %v", err)
 	}
 }
+
+func TestExtractBlasterFX(t *testing.T) {
+	dest := t.TempDir()
+	if err := emb.ExtractBlasterFX(dest); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"effects/blaster/wall_impact.efx", "effects/blaster/flesh_impact.efx"} {
+		if _, err := os.Stat(filepath.Join(dest, filepath.FromSlash(want))); err != nil {
+			t.Errorf("blaster-fx %s missing: %v", want, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, "zz-blaster-fx.pk3")); err == nil {
+		t.Error("the built pak should NOT be embedded (it is a gitignored artifact)")
+	}
+}
+
+// TestBlasterFXBuildsFromEmbedded proves the installer's pak builder can produce
+// zz-blaster-fx.pk3 from the embedded effects/ tree.
+func TestBlasterFXBuildsFromEmbedded(t *testing.T) {
+	dest := t.TempDir()
+	if err := emb.ExtractBlasterFX(dest); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dest, "zz-blaster-fx.pk3")
+	if _, err := paks.BuildBlasterFX(dest, out); err != nil {
+		t.Fatalf("BuildBlasterFX from embedded effects/: %v", err)
+	}
+	fi, err := os.Stat(out)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("built pak missing or empty: %v", err)
+	}
+}

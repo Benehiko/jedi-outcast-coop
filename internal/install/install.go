@@ -23,6 +23,9 @@ type Options struct {
 	// CoopUIDir holds the co-op UI assets (zz-coop-ui.pk3 and the ui/ tree used to
 	// build it). Defaults to <RepoRoot>/assets/coop-ui when empty.
 	CoopUIDir string
+	// BlasterFXDir holds the blaster impact-FX assets (the effects/ tree used to
+	// build zz-blaster-fx.pk3). Defaults to <RepoRoot>/assets/blaster-fx when empty.
+	BlasterFXDir string
 	// EngineSync, when non-nil, is called to bring the built engine in line with
 	// the graphics config (rebuilding if needed). The standalone flow injects an
 	// embed-backed sync here; when nil, the git-submodule sync (RepoRoot) is used.
@@ -215,6 +218,24 @@ func Install(ctx context.Context, p Platform, opts *Options) error {
 			return err
 		}
 		opts.infof("linked co-op UI overlay zz-coop-ui.pk3")
+	}
+
+	// Build + link the enhanced blaster impact-FX overlay. The pak is a build
+	// artifact (not shipped prebuilt), so it is always rebuilt from the effects/
+	// source tree. Non-fatal: a failure just leaves the stock impacts in place.
+	blasterFXDir := opts.BlasterFXDir
+	if blasterFXDir == "" {
+		blasterFXDir = filepath.Join(opts.RepoRoot, "assets", "blaster-fx")
+	}
+	blasterFXPak := filepath.Join(blasterFXDir, "zz-blaster-fx.pk3")
+	if _, err := paks.BuildBlasterFX(blasterFXDir, blasterFXPak); err != nil {
+		opts.infof("could not build blaster impact-FX overlay: %v", err)
+	}
+	if fileExists(blasterFXPak) {
+		if err := linkTracked(man, blasterFXPak, filepath.Join(baseDir, "zz-blaster-fx.pk3")); err != nil {
+			return err
+		}
+		opts.infof("linked blaster impact-FX overlay zz-blaster-fx.pk3")
 	}
 
 	// Launchers.

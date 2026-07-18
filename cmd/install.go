@@ -101,22 +101,26 @@ func runInstallStandalone(cmd *cobra.Command, wd workdir.Dir, buildDir, gamedata
 	if err != nil {
 		return err
 	}
-	// Ensure the co-op UI assets are on disk for the installer to pak (setup
-	// extracts them too; a bare `install` run must self-provision them).
+	// Ensure the co-op UI + blaster-FX assets are on disk for the installer to pak
+	// (setup extracts them too; a bare `install` run must self-provision them).
 	if err := embedCoopUI(wd); err != nil {
+		return err
+	}
+	if err := embedBlasterFX(wd); err != nil {
 		return err
 	}
 	out := cmd.OutOrStdout()
 	p := install.DetectPlatform(buildDir)
 	opts := &install.Options{
-		CoopUIDir:  wd.CoopUI(),
-		BuildDir:   buildDir,
-		GameData:   gamedata,
-		Config:     &cfg,
-		AssumeYes:  yes,
-		Out:        out,
-		Prompt:     stdinPrompt(cmd),
-		EngineSync: standaloneEngineSync(wd, buildDir, out),
+		CoopUIDir:    wd.CoopUI(),
+		BlasterFXDir: wd.BlasterFX(),
+		BuildDir:     buildDir,
+		GameData:     gamedata,
+		Config:       &cfg,
+		AssumeYes:    yes,
+		Out:          out,
+		Prompt:       stdinPrompt(cmd),
+		EngineSync:   standaloneEngineSync(wd, buildDir, out),
 	}
 	return install.Install(cmd.Context(), p, opts)
 }

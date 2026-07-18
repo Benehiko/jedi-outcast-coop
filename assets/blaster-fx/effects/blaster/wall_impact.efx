@@ -1,0 +1,176 @@
+// Enhanced blaster wall impact (jk2coop).
+// Stock JK2 wall impact was sparks + one small burnmark + a sound. This adds a
+// hotter contact flash, a punched "scorch hole" decal, and lingering smoke that
+// rises off the impact, so a blaster hit reads as a hot bolt burning the surface
+// rather than a flat spark. All shaders referenced here ship in retail assets0.
+
+// original sparks + tails
+FxRunner
+{
+	cullrange			1000
+
+	playfx
+	[
+		blaster/sparks
+	]
+}
+
+// hot contact flash — a brief bright orange/yellow glow at the point of impact
+Particle
+{
+	cullrange			1000
+
+	count				1
+
+	life				90 140
+
+	origin				0 0 0		0 0 0
+
+	flags				useModel
+
+	size
+	{
+		start			3.5 4.5
+		end				0.5
+		flags			nonlinear
+		parm			70 85
+	}
+
+	rgb
+	{
+		start			1.0 0.75 0.30	1.0 0.95 0.55
+		end				0.6 0.25 0.05
+		flags			nonlinear
+		parm			60 80
+	}
+
+	shader
+	[
+		gfx/effects/whiteGlow
+	]
+}
+
+// extra glowing debris flecks kicked off the surface
+Particle
+{
+	cullrange			1000
+
+	count				4 7
+
+	life				250 500
+
+	origin				0 0 0		0 0 0
+	vel					30 -55 -55		90 55 55
+	gravity				-200 -400
+	bounce				0.2 0.4
+
+	size
+	{
+		start			0.2 0.5
+		end				0.0
+		flags			nonlinear
+		parm			70 90
+	}
+
+	rgb
+	{
+		start			1.0 0.6 0.1		1.0 0.9 0.4
+		end				0.8 0.3 0.0
+		flags			linear
+	}
+
+	shader
+	[
+		gfx/misc/spark
+	]
+}
+
+// deep scorch hole — a larger, dark burn under the small stock mark reads as a
+// punched, charred hole rather than a scuff
+Decal
+{
+	cullrange			1400
+
+	size
+	{
+		start			9 13
+	}
+
+	rgb
+	{
+		start			0.10 0.09 0.08	0.16 0.14 0.12
+	}
+
+	shaders
+	[
+		gfx/damage/burnmark1
+	]
+}
+
+// bright inner scorch ring
+Decal
+{
+	cullrange			1200
+
+	size
+	{
+		start			4.5 6
+	}
+
+	shaders
+	[
+		gfx/damage/burnmark4
+	]
+}
+
+// lingering smoke rising off the burn
+Particle
+{
+	cullrange			900
+
+	count				2 3
+
+	life				900 1500
+
+	origin				0 -2 -2		0 2 2
+	vel					18 -10 -10		34 10 10
+	gravity				40 90
+
+	flags				useAlpha
+
+	size
+	{
+		start			2.5 4.0
+		end				7.0 11.0
+		flags			linear
+	}
+
+	alpha
+	{
+		start			0.7 0.9
+		end				0.0
+		flags			nonlinear
+		parm			55 75
+	}
+
+	rgb
+	{
+		start			0.25 0.24 0.23
+		end				0.10 0.10 0.10
+	}
+
+	shader
+	[
+		gfx/misc/black_smoke
+	]
+}
+
+Sound
+{
+	cullrange			750
+
+	sounds
+	[
+		sound/weapons/blaster/hit_wall.wav
+	]
+}

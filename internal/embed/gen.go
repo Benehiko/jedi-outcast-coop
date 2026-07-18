@@ -112,8 +112,14 @@ func run() error {
 	if err := mirrorDir(filepath.Join(root, "assets", "coop-ui"), filepath.Join(here, "coop-ui"), "", ".pk3"); err != nil {
 		return fmt.Errorf("mirroring coop-ui: %w", err)
 	}
+	// Mirror the blaster-fx SOURCE (the effects/ tree) for the same reason: the
+	// built zz-blaster-fx.pk3 is a gitignored artifact; the installer rebuilds it
+	// from the embedded effects/ tree (paks.BuildBlasterFX).
+	if err := mirrorDir(filepath.Join(root, "assets", "blaster-fx"), filepath.Join(here, "blaster-fx"), "", ".pk3"); err != nil {
+		return fmt.Errorf("mirroring blaster-fx: %w", err)
+	}
 
-	fmt.Printf("wrote openjk-src.tar.gz (%d bytes) + pin.txt (%s) + patches/ + coop-ui/\n", len(archive), pin[:12])
+	fmt.Printf("wrote openjk-src.tar.gz (%d bytes) + pin.txt (%s) + patches/ + coop-ui/ + blaster-fx/\n", len(archive), pin[:12])
 	return nil
 }
 

@@ -27,14 +27,18 @@ day. Three of its combat defaults read as dated on modern high-DPI, high
    crosshair; and bolts only shoved a target when they *killed* it, so
    connecting shots on a standing enemy applied no knockback and felt
    weak — made worse by the low 20-per-bolt damage.
+6. **Impacts looked flat.** A hit left a small scorch and a puff of smoke;
+   there was little sense of a hot bolt burning into the surface.
 
 This change modernizes those, and adds an opt-in to auto-skip the
-scripted map-intro cutscenes. It is engine-side (gamecode + client-game),
-shipped as patches
+scripted map-intro cutscenes. Most of it is engine-side (gamecode +
+client-game), shipped as patches
 [`0022-modern-combat.patch`](../patches/0022-modern-combat.patch) (changes
 1–4 and the cutscene skip) and
 [`0026-blaster-combat-feel.patch`](../patches/0026-blaster-combat-feel.patch)
-(change 5); no asset or retail-file changes are involved.
+(change 5); no retail-file changes are involved. The punchier impacts
+(change 6) are asset-side — an override effect pak (`zz-blaster-fx.pk3`) of
+original authorship that references only stock shaders.
 
 ## What changed
 
@@ -183,7 +187,36 @@ Like `g_blasterVelocity` (change 4), these are runtime archived cvars backed
 by an always-applied co-op patch, so a normal `jk2coop install` builds them in
 and they are tunable from the config with no rebuild.
 
-### 6. Optional cutscene auto-skip
+### 6. Punchier impact effects
+
+The engine picks the *hit* effect by name (`blaster/wall_impact`,
+`blaster/flesh_impact`), and those names resolve to `.efx` particle scripts in
+the retail assets. The stock scripts are modest: a small scorch mark and a
+little smoke on walls, a few chunks on flesh. To make a hit read like a hot
+bolt burning into the surface, the install ships an override pak,
+**`zz-blaster-fx.pk3`**, that shadows just those two effect scripts with
+enhanced versions:
+
+- a **hot contact flash** — a brief bright orange/yellow glow at the point of
+  impact;
+- a **scorch / hole decal** — a larger, darker burn under the stock mark so the
+  hit reads as a punched, charred hole rather than a scuff;
+- **lingering smoke** — thicker, longer-lived smoke that rises off the burn.
+
+This is purely additive and asset-side. The override `.efx` files are original
+authorship (written for this project) and only reference shaders that already
+ship in retail assets — **no retail file is copied or modified**. The `zz-`
+prefix sorts the pak after the retail `assets*.pk3` so its two effect scripts
+win. Remove the feature by deleting the one pak; the game falls back to the
+stock impacts. Because it is asset-only, it takes effect at the next launch with
+no rebuild.
+
+The effects are built from source at install time, the same way as the co-op UI
+overlay: the `.efx` tree lives in [`assets/blaster-fx`](../assets/blaster-fx)
+and is packed into `zz-blaster-fx.pk3` by the installer
+(`internal/paks.BuildBlasterFX`).
+
+### 7. Optional cutscene auto-skip
 
 `g_skipIntroCinematics` (new cvar, default `0`).
 
