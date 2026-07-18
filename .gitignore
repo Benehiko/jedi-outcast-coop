@@ -1,6 +1,7 @@
 openjk/build/
 openjk/build-debug/
 assets/coop-ui/zz-coop-ui.pk3
+assets/blaster-fx/zz-blaster-fx.pk3
 disk-*.qcow2
 
 # jk2coop tooling binary + release archives

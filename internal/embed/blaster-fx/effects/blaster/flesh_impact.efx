@@ -1,0 +1,122 @@
+// Enhanced blaster flesh/armor impact (jk2coop).
+// Stock JK2 flesh impact had a few glowing chunks and a little dark smoke. This
+// keeps that and adds a hot contact flash, more molten spray, a scorch decal
+// (the burnt "hole in the armor" read), and thicker, longer-lived smoke so a hit
+// on a character has visible weight. All shaders ship in retail assets0.
+
+// hot contact flash at the point of impact
+Particle
+{
+	count	1
+
+	life	90 150
+
+	origin	0 0 0		0 0 0
+
+	size
+	{
+		start	3.0 4.0
+		end		0.3
+		flags	nonlinear
+		parm	70 85
+	}
+
+	rgb
+	{
+		start	1.0 0.7 0.25	1.0 0.9 0.5
+		end		0.7 0.25 0.05
+		flags	nonlinear
+		parm	60 80
+	}
+
+	shader
+	[
+		gfx/effects/whiteGlow
+	]
+}
+
+// glowing molten chunks — more of them, punchier than stock
+Particle
+{
+	count	12	18
+	life	800	1200
+
+	origin	2 -3 -3		2 3 3
+	vel	50 -60 -60		130 60 60
+	gravity	-120	-320
+	bounce	0.3 	0.5
+
+	size
+	{
+		start 	0.3	1.0
+		end	0.0
+		parm	80	90
+		flags	nonlinear
+	}
+
+	rgb
+	{
+		start	1.0 0.4 0.0	1.0 1.0 0.2
+		end	1.0 0.4 0.0
+		flags	linear
+	}
+
+	shader
+	[
+		gfx/effects/whiteGlow
+	]
+}
+
+// scorch mark on the surface — the burnt "hole"
+Decal
+{
+	cullrange			1200
+
+	size
+	{
+		start			5 8
+	}
+
+	rgb
+	{
+		start			0.14 0.12 0.11	0.20 0.17 0.15
+	}
+
+	shaders
+	[
+		gfx/damage/burnmark1
+	]
+}
+
+// dark smoke — thicker and longer-lived than stock so the wound smokes
+Particle
+{
+	count	6	8
+	life	1000	1600
+
+	origin	2 -3 -3		2 3 3
+	vel	16 -14 -14		26 14 14
+	gravity	36	90
+
+	flags	useAlpha
+
+	size
+	{
+		start 	2.5	7.0
+		end	7.0	12.0
+		flags	linear
+	}
+
+	alpha
+	{
+		start	1.0
+		end 	0.0
+		parm	60 	80
+		flags	nonlinear
+	}
+
+	shader
+	[
+		gfx/misc/black_smoke
+	]
+}

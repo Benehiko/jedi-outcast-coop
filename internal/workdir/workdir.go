@@ -61,6 +61,10 @@ func (d Dir) Build() string { return filepath.Join(d.Src(), "build") }
 // CoopUI is the extracted co-op UI asset dir.
 func (d Dir) CoopUI() string { return filepath.Join(d.Root, "coop-ui") }
 
+// BlasterFX is the extracted blaster impact-FX asset dir (source for
+// zz-blaster-fx.pk3).
+func (d Dir) BlasterFX() string { return filepath.Join(d.Root, "blaster-fx") }
+
 // manifestPath is where the state manifest lives.
 func (d Dir) manifestPath() string { return filepath.Join(d.Root, "manifest.json") }
 

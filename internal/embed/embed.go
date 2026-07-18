@@ -41,6 +41,9 @@ var patchesFS embed.FS
 //go:embed all:coop-ui
 var coopUIFS embed.FS
 
+//go:embed all:blaster-fx
+var blasterFXFS embed.FS
+
 // Pin returns the OpenJK submodule commit the embedded source was built from.
 func Pin() string {
 	return strings.TrimSpace(pinText)
@@ -139,11 +142,25 @@ func Patches() ([]Patch, error) {
 // ExtractCoopUI writes the embedded co-op UI assets (the ui/ subtree and the
 // prebuilt zz-coop-ui.pk3) into dest/, mirroring the layout of assets/coop-ui.
 func ExtractCoopUI(dest string) error {
-	return fs.WalkDir(coopUIFS, "coop-ui", func(p string, d fs.DirEntry, err error) error {
+	return extractEmbeddedTree(coopUIFS, "coop-ui", dest)
+}
+
+// ExtractBlasterFX writes the embedded blaster impact-FX source (the effects/
+// subtree) into dest/, mirroring the layout of assets/blaster-fx, so the
+// installer can build zz-blaster-fx.pk3 from it.
+func ExtractBlasterFX(dest string) error {
+	return extractEmbeddedTree(blasterFXFS, "blaster-fx", dest)
+}
+
+// extractEmbeddedTree copies an embedded asset subtree (rooted at root) into
+// dest, stripping the root prefix so the tree lands directly under dest — i.e.
+// dest/<contents-of-root>, matching what each caller's dest already points at.
+func extractEmbeddedTree(fsys fs.FS, root, dest string) error {
+	return fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel("coop-ui", p)
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
@@ -151,7 +168,7 @@ func ExtractCoopUI(dest string) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		b, err := coopUIFS.ReadFile(p)
+		b, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
