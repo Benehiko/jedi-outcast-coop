@@ -95,6 +95,34 @@ hull lighting.
 Because textures are scaled at load, this is a latched cvar — it takes
 effect on the next engine start, before the first map loads.
 
+### Keeping colour on the software path (hue-preserving overbright)
+
+There's a subtlety in *how* the overbright brightening is applied at upload.
+The classic path bakes the overbright `<< shift` straight into the per-channel
+gamma table (`s_gammatable`) and looks each channel up independently, clamping
+at 255. That per-channel clamp is fine for the hardware-gamma ramp (it
+brightens the whole framebuffer at display, so it can't change one texel's
+colour) — but on the software path it distorts hue on any **saturated** texel:
+the brightest channel hits the 255 ceiling first while the other two keep
+climbing, so the colour ratio shifts. On bright, red-dominant **flesh** the red
+clamps while green does not, and skin reads a hard **green** — most visible on
+NPC faces (e.g. Jan in `kejim_post`) under a lit light-grid cell.
+
+The fix splits the two operations (`code/rd-vanilla/tr_image.cpp`):
+
+- `s_gammatableNoOB` holds **pure gamma** (no overbright shift), used by the
+  software texture path. `s_gammatable` keeps the shift baked in for the
+  hardware-gamma ramp, which can't distort per-texel hue.
+- `R_OverbrightTexel` applies the overbright factor (`1 << overbrightBits`)
+  across R/G/B together and, when that would push the brightest channel past
+  255, scales the **whole texel** down by that channel so it caps at 255 with
+  its exact hue. A saturated texel gives up a little brightness in the roll-off
+  instead of picking up a colour cast.
+
+This is purely a change to how `r_overBrightBitsSoftware 1` behaves — there is
+no new cvar and the preset is unchanged. Verified headless (`npc spawn jan`,
+`kejim_post`): the green face cast is gone while lit surfaces keep their punch.
+
 ### Models were still dark: entity lighting
 
 Software overbright fixed the *world* but left character models dark and flat
