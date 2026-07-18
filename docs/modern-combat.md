@@ -22,12 +22,19 @@ day. Three of its combat defaults read as dated on modern high-DPI, high
 4. **Blaster bolts were slow.** Primary-fire projectile velocities were
    low enough that bolts read as lobbed "slugs" you could stroll around,
    rather than the snappy near-hitscan of a modern shooter.
+5. **The blaster sprayed and hit soft.** Every player primary bolt was
+   nudged inside a random ±0.5° cone, so shots wandered off the fixed
+   crosshair; and bolts only shoved a target when they *killed* it, so
+   connecting shots on a standing enemy applied no knockback and felt
+   weak — made worse by the low 20-per-bolt damage.
 
 This change modernizes those, and adds an opt-in to auto-skip the
 scripted map-intro cutscenes. It is engine-side (gamecode + client-game),
-shipped as patch
-[`patches/0022-modern-combat.patch`](../patches/0022-modern-combat.patch);
-no asset or retail-file changes are involved.
+shipped as patches
+[`0022-modern-combat.patch`](../patches/0022-modern-combat.patch) (changes
+1–4 and the cutscene skip) and
+[`0026-blaster-combat-feel.patch`](../patches/0026-blaster-combat-feel.patch)
+(change 5); no asset or retail-file changes are involved.
 
 ## What changed
 
@@ -135,7 +142,48 @@ Enemy shots stay evadable: NPC blaster velocity is still cut by
 `BLASTER_NPC_VEL_CUT` / `BLASTER_NPC_HARD_VEL_CUT`, so with the player at
 4600 an ordinary trooper bolt lands around the old player speed.
 
-### 5. Optional cutscene auto-skip
+### 5. Sharper, weightier blaster (accuracy, knockback, damage)
+
+Two things made the E-11 blaster feel bad to use: shots wandered off the
+crosshair, and the ones that connected did almost nothing to a standing
+enemy. Both were baked into the stock behavior; patch
+[`0026-blaster-combat-feel`](../patches/0026-blaster-combat-feel.patch) makes
+each one a cvar and ships modern defaults.
+
+**Accuracy.** Stock JK2 sprayed *every* player primary bolt inside a random
+±0.5° cone (`BLASTER_MAIN_SPREAD`), so shots drifted off the fixed
+screen-center crosshair and the gun read as inaccurate. `g_blasterSpread` is
+that spread half-angle in degrees; the default `0` makes the player's primary
+pinpoint — the bolt goes exactly where you aim. This affects **player primary
+fire only**: NPC troopers keep their own aim-skill spread, and alt-fire keeps
+its wider `BLASTER_ALT_SPREAD`.
+
+**Knockback (the "weak hit" fix).** Stock blaster bolts carried the
+`DAMAGE_DEATH_KNOCKBACK` flag, which means a hit only shoves the target when
+it *kills* — a living enemy took zero push, so connecting shots felt like they
+did nothing. `g_blasterKnockback 1` (default) drops that death-only flag for
+the player's primary fire, so every hit runs the normal live-target knockback
+path: a small, mass-scaled shove that reads as impact. Set it to `0` to
+restore the stock feel (push on death only). NPCs are unaffected.
+
+**Damage.** The stock 20/bolt takes many hits to drop an enemy, which adds to
+the weak feel. `g_blasterDamage` overrides the player primary damage per bolt;
+the default `40` doubles it so hits land with weight without one-shotting.
+Set it to `0` to defer to the game's own value (retail 20, or whatever a
+`.wpn` file loads). Player primary only — NPC and alt-fire damage are
+untouched.
+
+| Cvar | Default | Meaning |
+|---|---|---|
+| `g_blasterSpread` | `0` | Player primary spread half-angle in degrees. `0` = pinpoint (modern); `0.5` = retail spray. |
+| `g_blasterKnockback` | `1` | `1` = player primary hits shove living targets (modern). `0` = knockback on death only (retail). |
+| `g_blasterDamage` | `0`/`40` | Player primary damage per bolt. `0` = use the loaded `.wpn` value (retail 20). The install writes `40` by default. |
+
+Like `g_blasterVelocity` (change 4), these are runtime archived cvars backed
+by an always-applied co-op patch, so a normal `jk2coop install` builds them in
+and they are tunable from the config with no rebuild.
+
+### 6. Optional cutscene auto-skip
 
 `g_skipIntroCinematics` (new cvar, default `0`).
 
@@ -178,6 +226,9 @@ old values). The `[game]` fields map to the cvars above:
 |---|---|---|
 | `sensitivity` | `sensitivity` | Base mouse sensitivity (default `0.5`; JK2 stock is `5`, fast on a high-DPI mouse) |
 | `blaster_velocity` | `g_blasterVelocity` | Primary blaster bolt speed (retail `2300`) |
+| `blaster_spread` | `g_blasterSpread` | Player primary spread half-angle in degrees (default `0` = pinpoint; retail `0.5`) |
+| `blaster_knockback` | `g_blasterKnockback` | `true` = player primary hits shove living targets (default); `false` = retail (push on kill only) |
+| `blaster_damage` | `g_blasterDamage` | Player primary damage per bolt (default `40`; `0` = use the game's own value, retail `20`) |
 | `aim_assist` | `g_saberAutoAim`, `cg_fovSensitivityScale` | `true` restores legacy saber auto-aim and FOV-linked sensitivity |
 | `dynamic_crosshair` | `cg_dynamicCrosshair` | `true` restores the legacy muzzle-traced dynamic crosshair |
 | `skip_cutscenes` | `g_skipIntroCinematics` | `true` auto-skips scripted map-intro cutscenes |
@@ -205,6 +256,9 @@ seta g_saberAutoAim 1          // classic saber auto-aim
 seta cg_fovSensitivityScale 1  // classic FOV-linked sensitivity
 seta cg_dynamicCrosshair 1     // classic muzzle-traced dynamic crosshair
 seta g_skipIntroCinematics 0   // let map-intro cutscenes play (default)
+seta g_blasterSpread 0.5       // classic player blaster spray
+seta g_blasterKnockback 0      // classic knockback (on kill only)
+seta g_blasterDamage 20        // classic blaster damage per bolt
 ```
 
 Projectile speeds are compile-time; to restore them, edit the velocities
@@ -219,5 +273,14 @@ The change builds into the single-player module `jospgamex86_64.so`
 
 ```
 ninja -C openjk/build jospgamex86_64
-strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale|cg_dynamicCrosshair|g_skipIntroCinematics'
+strings openjk/build/codeJK2/game/jospgamex86_64.so | grep -E 'g_saberAutoAim|cg_fovSensitivityScale|cg_dynamicCrosshair|g_skipIntroCinematics|g_blasterSpread|g_blasterKnockback|g_blasterDamage'
+```
+
+To confirm the blaster cvars register at runtime with their defaults, drive
+one headless instance into a map (they are game-init cvars, so they appear only
+after a map loads, not in the main menu) and dump them:
+
+```
+tools/headless-shot.sh --map kejim_post --skip-cutscenes --cheats \
+  --cfg your-dump.cfg   # a cfg containing: cvarlist g_blaster
 ```
