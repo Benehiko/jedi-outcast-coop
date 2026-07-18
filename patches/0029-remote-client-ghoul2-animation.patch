@@ -1,0 +1,108 @@
+diff --git a/codeJK2/cgame/cg_players.cpp b/codeJK2/cgame/cg_players.cpp
+--- a/codeJK2/cgame/cg_players.cpp
++++ b/codeJK2/cgame/cg_players.cpp
+@@ -1118,6 +1118,91 @@
+ 
+ /*
+ ===============
++CG_RemoteDriveGhoul2Anim
++
++co-op dual-load: drive a networked player/NPC's ghoul2 skeleton from the
++legsAnim/torsoAnim carried in its entityState. On the host the server sim runs
++PM_SetAnim every time an anim changes, which calls G2API_SetBoneAnimIndex on the
++lower_lumbar / model_root bones; the ghoul2 render path (CG_Player's ghoul2.size()
++branch) then just samples whatever the skeleton is currently playing. A serverless
++remote client never runs that sim, so the skeleton stays frozen at its bind pose
++(the "T-pose"). Here we reuse the exact host code path — PM_SetAnimFinal — so the
++remote client plays the same animation the host networked. Only fires when the
++networked anim differs from what we last applied (tracked in cent->pe), so it does
++one SetBoneAnim per anim change, not per frame. No-op on the host (cg_remoteClient
++false) and on entities without a built ghoul2 / valid anim file.
++===============
++*/
++// Apply one animation to a ghoul2 bone via the low-level G2API. Mirrors the core
++// of PM_SetAnimFinal (bg_panimate.cpp) but WITHOUT its server-sim dependencies
++// (PM_GetTimeScaleMod dereferences g_timescale, a server cvar that is NULL in the
++// serverless remote-client gamecode → the reason calling PM_SetAnimFinal here
++// segfaults). We just start the frame range looping/freezing on the bone.
++static void CG_RemoteSetBoneAnim( gentity_t *gent, int boneIndex, const animation_t *anim )
++{
++	if ( boneIndex == -1 || !anim->numFrames )
++	{
++		return;
++	}
++	// animSpeed 1.0 == 20fps (frameLerp 50ms/frame), matching PM_SetAnimFinal.
++	const float	animSpeed = ( anim->frameLerp != 0 ) ? ( 50.0f / anim->frameLerp ) : 1.0f;
++	const int	firstFrame = anim->firstFrame;
++	const int	lastFrame  = anim->firstFrame + anim->numFrames;
++	// loopFrames != -1 => cycling idle/run; otherwise a one-shot that freezes on
++	// its last frame (stock uses OVERRIDE_LOOP vs OVERRIDE_FREEZE).
++	const int	animFlags = ( anim->loopFrames != -1 ) ? BONE_ANIM_OVERRIDE_LOOP : BONE_ANIM_OVERRIDE_FREEZE;
++
++	gi.G2API_SetBoneAnimIndex( &gent->ghoul2[gent->playerModel], boneIndex,
++		firstFrame, lastFrame, animFlags, animSpeed, cg.time, -1, -1 );
++}
++
++static void CG_RemoteDriveGhoul2Anim( centity_t *cent )
++{
++	if ( !cg_remoteClient )
++	{
++		return;
++	}
++
++	gentity_t *gent = cent->gent;
++	if ( !gent || !gent->client )
++	{
++		return;
++	}
++	if ( !ValidAnimFileIndex( gent->client->clientInfo.animFileIndex ) )
++	{
++		return;	// model/anim set not built yet
++	}
++	if ( !gi.G2API_HaveWeGhoul2Models( gent->ghoul2 ) )
++	{
++		return;
++	}
++
++	const animation_t *animations = level.knownAnimFileSets[gent->client->clientInfo.animFileIndex].animations;
++	const int netLegs  = cent->currentState.legsAnim;
++	const int netTorso = cent->currentState.torsoAnim;
++
++	// Re-issue only when the networked anim changes. Track what we last applied in
++	// the gent's ps anim fields (unused by the serverless remote sim otherwise).
++	// Legs drive the root (+ motion) bone; torso drives the lower_lumbar bone —
++	// the same mapping PM_SetAnimFinal uses.
++	if ( netLegs >= 0 && netLegs < MAX_ANIMATIONS && gent->client->ps.legsAnim != netLegs )
++	{
++		gent->client->ps.legsAnim = netLegs;
++		CG_RemoteSetBoneAnim( gent, gent->rootBone, &animations[netLegs] );
++		if ( gent->motionBone != -1 )
++		{
++			CG_RemoteSetBoneAnim( gent, gent->motionBone, &animations[netLegs] );
++		}
++	}
++	if ( netTorso >= 0 && netTorso < MAX_ANIMATIONS && gent->client->ps.torsoAnim != netTorso )
++	{
++		gent->client->ps.torsoAnim = netTorso;
++		CG_RemoteSetBoneAnim( gent, gent->lowerLumbarBone, &animations[netTorso] );
++	}
++}
++
++/*
++===============
+ CG_PlayerAnimation
+ ===============
+ */
+@@ -5081,6 +5166,12 @@
+ 		vec3_t				tempAngles;
+ 		memset (&ent, 0, sizeof(ent));
+ 
++		// co-op dual-load: on a serverless remote client, drive this character's
++		// ghoul2 skeleton from its networked legsAnim/torsoAnim before we sample it
++		// below (the host does this in its server sim via PM_SetAnim). Without it the
++		// skeleton never plays and the player/NPC renders frozen in the bind pose.
++		CG_RemoteDriveGhoul2Anim( cent );
++
+ 		//FIXME: if at all possible, do all our sets before our gets to do only *1* G2 skeleton transform per render frame
+ 		CG_SetGhoul2Info(&ent, cent);
+ 
