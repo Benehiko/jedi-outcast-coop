@@ -192,9 +192,24 @@ func prepareGuest(ctx context.Context, out io.Writer) error {
 	}
 }
 
-// Delete removes the build VM and its disks. Callers offer this as a prompt
-// after a successful build; keeping the VM speeds up re-runs.
+// Delete removes the build VM, its disks, and runtime state (backups are kept
+// by vee). Callers offer this as a prompt after a successful build; keeping the
+// VM speeds up re-runs.
+//
+// vee has two sharp edges here: `vee delete` takes no confirmation flag (an
+// unknown --yes aborts it), and it silently no-ops on a *running* VM — it prints
+// usage and exits 0 without deleting anything. So we stop a running VM first,
+// then delete. Absent is a no-op.
 func Delete(ctx context.Context, out io.Writer) error {
+	switch vmState(ctx) {
+	case vmAbsent:
+		_, _ = fmt.Fprintf(out, "Build VM %q already gone; nothing to delete.\n", VMName)
+		return nil
+	case vmRunning:
+		if err := vee(ctx, out, "stop", VMName); err != nil {
+			return err
+		}
+	}
 	_, _ = fmt.Fprintf(out, "Deleting build VM %q…\n", VMName)
-	return vee(ctx, out, "delete", VMName, "--yes")
+	return vee(ctx, out, "delete", VMName)
 }
