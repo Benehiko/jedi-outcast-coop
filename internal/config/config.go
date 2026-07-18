@@ -34,6 +34,18 @@ type Game struct {
 	// BlasterVelocity is the primary blaster bolt speed (seta g_blasterVelocity),
 	// exposed by the 0025 patch. Stock is 2300.
 	BlasterVelocity int `toml:"blaster_velocity"`
+	// BlasterSpread is the player primary blaster spread half-angle in degrees
+	// (seta g_blasterSpread), exposed by the 0026 patch. 0 = pinpoint (modern);
+	// retail sprays every bolt within 0.5.
+	BlasterSpread float64 `toml:"blaster_spread"`
+	// BlasterKnockback makes player primary blaster hits shove living targets
+	// (seta g_blasterKnockback 1), exposed by the 0026 patch. Off = retail feel
+	// (knockback on death only), which reads as weak hits.
+	BlasterKnockback bool `toml:"blaster_knockback"`
+	// BlasterDamage overrides the player primary blaster damage per bolt
+	// (seta g_blasterDamage), exposed by the 0026 patch. 0 = use the loaded .wpn
+	// value (retail 20); >0 overrides it.
+	BlasterDamage int `toml:"blaster_damage"`
 	// AimAssist enables the legacy JK2 feel: saber auto-aim and FOV-linked mouse
 	// sensitivity (g_saberAutoAim 1, cg_fovSensitivityScale 1). Off = modern.
 	AimAssist bool `toml:"aim_assist"`
@@ -84,6 +96,18 @@ type Graphics struct {
 // StockBlasterVelocity is the retail primary blaster bolt speed (weapons.h).
 const StockBlasterVelocity = 2300
 
+// Blaster combat-feel defaults (0026 patch). ModernBlasterSpread 0 gives the
+// player a pinpoint primary (retail sprays 0.5 deg). ModernBlasterDamage 40
+// doubles the weak stock 20/bolt so hits land with weight without one-shotting;
+// 0 would defer to the loaded .wpn value. StockBlasterSpread / StockBlasterDamage
+// reproduce the retail feel for anyone who wants it.
+const (
+	ModernBlasterSpread = 0.0
+	ModernBlasterDamage = 40
+	StockBlasterSpread  = 0.5
+	StockBlasterDamage  = 20
+)
+
 // Texture upscale output tiers (largest-side pixel cap). The gfx menu and the
 // installer offer these three; DefaultTextureResolution is the out-of-the-box
 // choice.
@@ -105,6 +129,9 @@ func Defaults() Config {
 		Game: Game{
 			Sensitivity:      0.5,
 			BlasterVelocity:  StockBlasterVelocity,
+			BlasterSpread:    ModernBlasterSpread,
+			BlasterKnockback: true,
+			BlasterDamage:    ModernBlasterDamage,
 			AimAssist:        false,
 			DynamicCrosshair: false,
 			SkipCutscenes:    false,

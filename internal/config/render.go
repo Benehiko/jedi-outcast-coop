@@ -30,6 +30,9 @@ func (c Config) AutoexecBytes() []byte {
 	b.WriteString(seta("g_skipIntroCinematics", boolCvar(c.Game.SkipCutscenes)))
 	b.WriteString(seta("sensitivity", formatFloat(c.Game.Sensitivity)))
 	b.WriteString(seta("g_blasterVelocity", strconv.Itoa(c.Game.BlasterVelocity)))
+	b.WriteString(seta("g_blasterSpread", formatFloat(c.Game.BlasterSpread)))
+	b.WriteString(seta("g_blasterKnockback", boolCvar(c.Game.BlasterKnockback)))
+	b.WriteString(seta("g_blasterDamage", strconv.Itoa(c.Game.BlasterDamage)))
 
 	// Render-fidelity preset. With lighting on, the software-overbright path (from
 	// the 0024 patch) is paired with the companion fidelity cvars. With it off, the

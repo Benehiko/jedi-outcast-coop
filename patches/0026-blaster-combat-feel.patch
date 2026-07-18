@@ -1,0 +1,102 @@
+diff --git a/codeJK2/game/g_local.h b/codeJK2/game/g_local.h
+index d6ba78ad..6d5dd1e0 100644
+--- a/codeJK2/game/g_local.h
++++ b/codeJK2/game/g_local.h
+@@ -303,6 +303,9 @@ extern	cvar_t	*g_debugMove;
+ extern	cvar_t	*g_subtitles;
+ extern	cvar_t	*g_removeDoors;
+ extern	cvar_t	*g_blasterVelocity;
++extern	cvar_t	*g_blasterSpread;
++extern	cvar_t	*g_blasterKnockback;
++extern	cvar_t	*g_blasterDamage;
+ 
+ extern	cvar_t	*g_ICARUSDebug;
+ 
+diff --git a/codeJK2/game/g_main.cpp b/codeJK2/game/g_main.cpp
+index 43e16211..ea818ef3 100644
+--- a/codeJK2/game/g_main.cpp
++++ b/codeJK2/game/g_main.cpp
+@@ -171,6 +171,9 @@ cvar_t	*g_saberMoveSpeed;
+ cvar_t	*g_saberAnimSpeed;
+ cvar_t	*g_saberAutoAim;
+ cvar_t	*g_blasterVelocity;
++cvar_t	*g_blasterSpread;
++cvar_t	*g_blasterKnockback;
++cvar_t	*g_blasterDamage;
+ 
+ qboolean	stop_icarus = qfalse;
+ 
+@@ -592,6 +595,9 @@ void G_InitCvars( void ) {
+ 	g_saberAnimSpeed = gi.cvar( "g_saberAnimSpeed", "1", CVAR_ARCHIVE|CVAR_CHEAT );//how fast saber animations run
+ 	g_saberAutoAim = gi.cvar( "g_saberAutoAim", "0", CVAR_ARCHIVE );//auto-aims (snaps facing/swings) at enemies when not moving or just running forward; off by default for modern free aim, set to 1 for legacy behavior
+ 	g_blasterVelocity = gi.cvar( "g_blasterVelocity", "2300", CVAR_ARCHIVE );//primary blaster bolt speed (retail 2300)
++	g_blasterSpread = gi.cvar( "g_blasterSpread", "0", CVAR_ARCHIVE );//player primary blaster spread half-angle in degrees; 0 = pinpoint (modern), 0.5 = retail spray
++	g_blasterKnockback = gi.cvar( "g_blasterKnockback", "1", CVAR_ARCHIVE );//1 = player primary blaster hits shove living targets (modern); 0 = knockback on death only (retail)
++	g_blasterDamage = gi.cvar( "g_blasterDamage", "0", CVAR_ARCHIVE );//player primary blaster damage per bolt; 0 = use loaded .wpn value (retail 20), >0 overrides
+ 
+ 	g_AIsurrender = gi.cvar( "g_AIsurrender", "0", CVAR_CHEAT );
+ 	g_numEntities = gi.cvar( "g_numEntities", "0", CVAR_CHEAT );
+diff --git a/codeJK2/game/wp_blaster_rifle.cpp b/codeJK2/game/wp_blaster_rifle.cpp
+index 90aa75e3..d8a4ea1b 100644
+--- a/codeJK2/game/wp_blaster_rifle.cpp
++++ b/codeJK2/game/wp_blaster_rifle.cpp
+@@ -39,6 +39,16 @@ static void WP_FireBlasterMissile( gentity_t *ent, vec3_t start, vec3_t dir, qbo
+ 	int velocity	= g_blasterVelocity ? g_blasterVelocity->integer : BLASTER_VELOCITY;
+ 	int	damage		= !altFire ? weaponData[WP_BLASTER].damage : weaponData[WP_BLASTER].altDamage;
+ 
++	// Modern combat: let the player's E-11 primary hit harder than the stock
++	// 20/bolt (which reads as "weak") without touching NPC balance or the
++	// data-driven .wpn value. g_blasterDamage 0 = use the loaded weaponData
++	// damage (retail); >0 overrides it for player-fired bolts only.
++	const qboolean playerFired = ( ent && ent->s.number == 0 ) ? qtrue : qfalse;
++	if ( playerFired && !altFire && g_blasterDamage && g_blasterDamage->integer > 0 )
++	{
++		damage = g_blasterDamage->integer;
++	}
++
+ 	// If an enemy is shooting at us, lower the velocity so you have a chance to evade
+ 	if ( ent->client && ent->client->ps.clientNum != 0 )
+ 	{
+@@ -87,7 +97,20 @@ static void WP_FireBlasterMissile( gentity_t *ent, vec3_t start, vec3_t dir, qbo
+ //	}
+ 
+ 	missile->damage = damage;
+-	missile->dflags = DAMAGE_DEATH_KNOCKBACK;
++	// Stock blaster bolts carry DAMAGE_DEATH_KNOCKBACK, so a hit only shoves the
++	// target when it *kills* — a living enemy takes zero push, which is why
++	// connecting shots feel like they do nothing. For the player's primary fire,
++	// g_blasterKnockback 1 (default) drops the death-only flag so every hit runs
++	// the normal live-target knockback path (a small, mass-scaled shove). Set 0
++	// to restore stock behavior (knockback on death only).
++	if ( playerFired && !altFire && g_blasterKnockback && g_blasterKnockback->integer )
++	{
++		missile->dflags = 0;
++	}
++	else
++	{
++		missile->dflags = DAMAGE_DEATH_KNOCKBACK;
++	}
+ 	if ( altFire )
+ 	{
+ 		missile->methodOfDeath = MOD_BLASTER_ALT;
+@@ -129,9 +152,17 @@ void WP_FireBlaster( gentity_t *ent, qboolean alt_fire )
+ 		}
+ 		else
+ 		{
+-			// add some slop to the main-fire direction
+-			angs[PITCH] += Q_flrand(-1.0f, 1.0f) * BLASTER_MAIN_SPREAD;
+-			angs[YAW]	+= Q_flrand(-1.0f, 1.0f) * BLASTER_MAIN_SPREAD;
++			// Player primary fire. Stock JK2 sprays every bolt within a random
++			// +/-BLASTER_MAIN_SPREAD (0.5deg) cone, so shots wander off the
++			// fixed center crosshair and the gun feels inaccurate. g_blasterSpread
++			// is that half-angle in degrees; default 0 = pinpoint (bolt goes
++			// exactly where you aim). Set it to 0.5 to restore the retail spray.
++			const float spread = g_blasterSpread ? g_blasterSpread->value : BLASTER_MAIN_SPREAD;
++			if ( spread > 0.0f )
++			{
++				angs[PITCH] += Q_flrand(-1.0f, 1.0f) * spread;
++				angs[YAW]	+= Q_flrand(-1.0f, 1.0f) * spread;
++			}
+ 		}
+ 	}
+ 

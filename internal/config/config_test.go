@@ -79,6 +79,9 @@ func TestAutoexecBytes(t *testing.T) {
 		`seta cg_dynamicCrosshair "0"`, // DynamicCrosshair default off
 		`seta cg_fovSensitivityScale "0"`,
 		`seta g_skipIntroCinematics "0"`,
+		`seta g_blasterSpread "0"`,    // pinpoint player primary (modern)
+		`seta g_blasterKnockback "1"`, // live-hit shove on (modern)
+		`seta g_blasterDamage "40"`,   // ModernBlasterDamage default
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("autoexec missing %q in:\n%s", want, out)
@@ -91,12 +94,18 @@ func TestAutoexecClassicFeel(t *testing.T) {
 	c.Game.AimAssist = true
 	c.Game.DynamicCrosshair = true
 	c.Game.SkipCutscenes = true
+	c.Game.BlasterSpread = StockBlasterSpread
+	c.Game.BlasterKnockback = false
+	c.Game.BlasterDamage = StockBlasterDamage
 	out := string(c.AutoexecBytes())
 	for _, want := range []string{
 		`seta g_saberAutoAim "1"`,
 		`seta cg_fovSensitivityScale "1"`,
 		`seta cg_dynamicCrosshair "1"`,
 		`seta g_skipIntroCinematics "1"`,
+		`seta g_blasterSpread "0.5"`,
+		`seta g_blasterKnockback "0"`,
+		`seta g_blasterDamage "20"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("autoexec missing %q in:\n%s", want, out)
