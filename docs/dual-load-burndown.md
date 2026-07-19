@@ -65,9 +65,16 @@ pass-throughs all resolved. The architecture works; the burn-down begins.
 - **Cause:** the first-person viewmodel is rendered almost entirely from the
   local player's server `gentity` (`renderInfo`, ghoul2 model,
   `lowerLumbarBone`), which is null on a serverless client.
-- **Status:** guarded — `CG_AddViewWeapon` early-returns when
-  `!cent->gent || !cent->gent->client`. The viewmodel is skipped this frame
-  (future work: a snapshot-backed viewmodel); the world still renders.
+- **Status:** RESOLVED (MVP), patch 0031, issue #45. On the remote client
+  `CG_AddViewWeapon` now delegates to `CG_RemoteAddViewWeapon`, which builds the
+  first-person gun from the networked `ps->weapon` using only `cg.*` view state
+  (`CG_CalculateWeaponPosition` + `cg_gun_*`) — no gentity, ghoul2, renderInfo,
+  saber, or muzzle-flash state. The gun is drawn at a static animation frame
+  (frame 0): shown but not fire-animated, because the fire→frame mapping needs
+  the local player's ghoul2 skeleton the remote client never builds. The host
+  path is untouched (guarded on `cg_remoteClient`). Verified live headless:
+  joiner's own weapon renders in first person (previously empty hands).
+  Remaining future work: fire animation and muzzle flash on the remote viewmodel.
 
 ### #5 — HUD force-power / debug / goggles read the gentity
 

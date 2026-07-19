@@ -91,12 +91,26 @@ This re-tars the pruned source at the submodule's current `HEAD` (via
 records the commit in `internal/embed/pin.txt`, and mirrors `patches/` and
 `assets/coop-ui/` into the package.
 
-**After bumping the OpenJK submodule, run `make generate` and commit the
-result.** CI enforces this: the `embed-in-sync` job runs `make verify-embed`,
-which regenerates the embed and fails if it produces any diff — so the baked-in
-source can never silently drift from the pin. The gzip stream is produced by the
-Go toolchain (pinned via `go-version-file` in CI), so the archive is
+**After adding a patch to `patches/` (or bumping the OpenJK submodule, or
+editing `assets/coop-ui/`), run `make generate` and commit the result** —
+including any *new* files it writes under `internal/embed/patches/`. The engine
+binary embeds the mirror (`//go:embed patches/*.patch` in `embed.go`), not the
+repo-root `patches/`, so a mirror file that is never committed is simply absent
+from every binary built from the embedded source (the default `jk2coop setup`).
+
+CI enforces this: the `embed-in-sync` job runs `make verify-embed`, which
+regenerates the embed and fails if it produces any diff — so the baked-in source
+can never silently drift from the pin. The gzip stream is produced by the Go
+toolchain (pinned via `go-version-file` in CI), so the archive is
 byte-reproducible across machines running the same Go version.
+
+> **Guard scope (learned the hard way).** `verify-embed` originally checked only
+> `git diff`, which does not report *untracked* files. A newly generated mirror
+> patch is untracked, so a "forgot to commit the mirror" passed CI green while
+> the binary shipped an incomplete patch set — patches 0027–0030 (the co-op
+> sync/animation/weapon fixes) drifted out of the mirror across four merged PRs
+> this way. `verify-embed` now also fails on any untracked file under
+> `internal/embed/`, closing that hole.
 
 ## Patch application in pure Go
 

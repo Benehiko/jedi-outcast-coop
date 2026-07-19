@@ -32,11 +32,21 @@ generate:
 # CI guard: regenerating the embed must produce no diff. A submodule bump (or a
 # patches/ or assets/coop-ui/ edit) that forgets `make generate` fails here, so
 # the baked-in source can never silently drift from the pin.
+#
+# `git diff` alone misses NEW mirror files: a fresh patch (patches/00NN-*.patch)
+# regenerates into internal/embed/patches/ as an UNTRACKED file, which `git diff`
+# does not report — so a "forgot to commit the mirror" slips through green. Check
+# both tracked changes AND untracked files under internal/embed.
 verify-embed: generate
-	@if ! git diff --quiet -- internal/embed; then \
+	@untracked="$$(git ls-files --others --exclude-standard -- internal/embed)"; \
+	if ! git diff --quiet -- internal/embed || [ -n "$$untracked" ]; then \
 	  echo "internal/embed is out of sync with the submodule/patches/assets." >&2; \
 	  echo "Run 'make generate' and commit the result:" >&2; \
 	  git --no-pager diff --stat -- internal/embed >&2; \
+	  if [ -n "$$untracked" ]; then \
+	    echo "untracked (new) embed files not committed:" >&2; \
+	    printf '  %s\n' $$untracked >&2; \
+	  fi; \
 	  exit 1; \
 	fi
 	@echo "internal/embed is in sync"
