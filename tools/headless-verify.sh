@@ -64,7 +64,7 @@ echo ">>> launching HOST (net_enabled, spawns an NPC after settle)"
   +wait 400 +"npc spawn stormtrooper" \
   +wait 50  +"npc spawn stormtrooper" \
   +wait 50  +"npc spawn stormtrooper" \
-  +wait 100000 +quit \
+  +wait 100000 \
   > "$HOST_LOG" 2>&1 &
 HOST_PID=$!
 
@@ -97,16 +97,23 @@ echo ">>> launching CLIENT (dual-load remote), connecting to :$REAL_PORT"
   +wait 150 +screenshot_png \
   +wait 150 +screenshot_png \
   +wait 150 +screenshot_png \
-  +wait 60  +quit \
+  +wait 60 \
   > "$CLIENT_LOG" 2>&1 &
 CLIENT_PID=$!
 
-echo ">>> waiting for client to finish (max ~80s)"
+# NB: no `+quit` on either instance. The in-console `quit` runs a shutdown that
+# makes a filesystem call after FS teardown ("Filesystem call made without
+# initialization"), recurses, and pops a blocking zenity crash dialog that hangs
+# a headless run for minutes. We wait for the expected screenshots, then end both
+# with SIGTERM (below), which exits cleanly without that path.
+CLIENT_SHOTDIR="$CLIENT_HOME/base/screenshots"
+echo ">>> waiting for 6 client screenshot(s) (max ~90s)"
 for i in $(seq 1 90); do
   kill -0 "$CLIENT_PID" 2>/dev/null || break
+  [[ "$(ls -1 "$CLIENT_SHOTDIR"/*.png 2>/dev/null | wc -l)" -ge 6 ]] && break
   sleep 1
 done
-kill "$CLIENT_PID" 2>/dev/null
+kill "$CLIENT_PID" 2>/dev/null   # SIGTERM: clean shutdown, no +quit crash dialog
 
 echo ">>> teardown"
 kill "$HOST_PID" 2>/dev/null

@@ -122,18 +122,28 @@ CMD+=( +wait "$SETTLE" )
 for _ in $(seq 1 "$SHOTS"); do
   CMD+=( +screenshot_png +wait 60 )
 done
-CMD+=( +quit )
+# NB: deliberately NO `+quit`. The engine's in-console `quit` runs a shutdown that
+# makes a filesystem call after the FS subsystem is torn down ("Filesystem call
+# made without initialization"), which recurses and pops a blocking zenity crash
+# dialog — under headless Xvfb nobody clicks OK, so the run hangs for minutes. We
+# instead let the engine idle after the last shot (the screenshots are already on
+# disk) and end it with SIGTERM below, which exits cleanly without that path.
+CMD+=( +wait 60 )
 
 echo ">>> launching engine: ${MENU:+menu=$MENU }${MAP:+map=$MAP }shots=$SHOTS"
 "${CMD[@]}" > "$LOG" 2>&1 &
 PID=$!
 
-echo ">>> waiting for run to finish (max ~90s)"
+# Wait until the expected number of screenshots have been written (bounded), then
+# stop the engine with SIGTERM. Screenshots go to <homepath>/base/screenshots.
+SHOTDIR="$HOME_DIR/base/screenshots"
+echo ">>> waiting for $SHOTS screenshot(s) (max ~90s)"
 for i in $(seq 1 90); do
   kill -0 "$PID" 2>/dev/null || break
+  [[ "$(ls -1 "$SHOTDIR"/*.png 2>/dev/null | wc -l)" -ge "$SHOTS" ]] && break
   sleep 1
 done
-kill "$PID" 2>/dev/null
+kill "$PID" 2>/dev/null   # SIGTERM: clean shutdown, no +quit crash dialog
 
 echo ">>> teardown"
 pkill -f 'openjo_sp.x86_64' 2>/dev/null
