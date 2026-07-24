@@ -37,6 +37,13 @@ manage it with `jk2coop vee`. Override the default with:
 When `vee` cannot be obtained (no network, unsupported platform) and is not
 installed, `setup` falls back to a host build.
 
+**On macOS the default is a native host build instead.** A Linux container/VM
+cannot emit a macOS Mach-O binary (see the target table below), so on a Mac
+`setup` skips `vee` entirely and builds with your local cmake/ninja/compiler
+toolchain — `--docker` and `--vm` are rejected up front there. Install the
+toolchain (`setup` prints the exact command when it is missing) or use the
+`jk2coop-macos` CI artifact to skip building locally.
+
 By default `setup` builds from the **source embedded in the binary**, extracted
 to `~/.cache/jk2coop` — see [embedded-source.md](embedded-source.md). The manual
 sections below operate on the `openjk/` submodule directly and are the reference

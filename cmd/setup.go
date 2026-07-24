@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -54,6 +55,10 @@ func newSetupCmd() *cobra.Command {
 			"downloads a pinned, checksum-verified copy into the config dir\n" +
 			"(~/.config/jk2coop/bin) and keeps it for later rebuilds. Manage the vee/VM\n" +
 			"machinery with `jk2coop vee`.\n\n" +
+			"On macOS the default is instead a native host build: a Linux container/VM\n" +
+			"cannot emit a macOS (Mach-O) engine, so setup builds with your local\n" +
+			"cmake/ninja/compiler toolchain and never downloads vee (--docker/--vm are\n" +
+			"rejected there). Use the 'jk2coop-macos' CI artifact to skip building.\n\n" +
 			"Pass --host to build on this machine (needs the cmake/ninja/compiler\n" +
 			"toolchain) or --vm for a plain VM build. When vee cannot be obtained,\n" +
 			"setup falls back to a host build.",
@@ -261,19 +266,24 @@ func exclusiveBuildFlags(useVM, useHost, useDocker bool) error {
 
 // chooseBuildMethod decides where to build, gathering the live host state (vee
 // availability, missing toolchain) and delegating the pure decision to
-// decideBuildMethod. Unless the user forced --host, it first tries to make vee
-// available — using an existing install or downloading jk2coop's own managed
-// copy from GitHub releases — so the default container build works with no host
-// toolchain. The downloaded vee is kept under the config dir for later rebuilds.
+// decideBuildMethod. Unless the user forced --host (or is on macOS, where the
+// container build is impossible), it first tries to make vee available — using
+// an existing install or downloading jk2coop's own managed copy from GitHub
+// releases — so the default container build works with no host toolchain. The
+// downloaded vee is kept under the config dir for later rebuilds.
 func chooseBuildMethod(cmd *cobra.Command, useVM, useHost, useDocker bool) (buildMethod, error) {
 	out := cmd.OutOrStdout()
 	veeAvail := ensureVee(cmd, useHost)
 	toolMissing := len(prereq.Missing()) > 0
-	method, err := decideBuildMethod(useVM, useHost, useDocker, veeAvail, toolMissing)
+	method, err := decideBuildMethod(useVM, useHost, useDocker, veeAvail, toolMissing, runtime.GOOS)
 	if err != nil {
 		return buildHost, err
 	}
-	if method == buildHost && !useHost && !veeAvail && !toolMissing {
+	// The "install vee" nudge only applies where the container build is a real
+	// option. On macOS it never is (a Linux container can't emit a Mach-O
+	// binary), so suggesting vee there would be misleading — the host build is
+	// the intended default, not a fallback.
+	if method == buildHost && !useHost && !veeAvail && !toolMissing && runtime.GOOS != "darwin" {
 		_, _ = fmt.Fprintln(out,
 			"vee unavailable; building on this machine (install vee for the default container build).")
 	}
@@ -285,8 +295,11 @@ func chooseBuildMethod(cmd *cobra.Command, useVM, useHost, useDocker bool) (buil
 // needed) and treats a download failure as "vee unavailable" (a warning, not a
 // fatal error) so setup can still fall back to a host build.
 func ensureVee(cmd *cobra.Command, useHost bool) bool {
-	if useHost {
-		return false // host build needs no vee; skip the network entirely
+	// A host build needs no vee, and on macOS the container/VM paths cannot
+	// produce a runnable (Mach-O) engine at all — so vee is never useful there.
+	// In both cases skip the network entirely.
+	if useHost || runtime.GOOS == "darwin" {
+		return false
 	}
 	out := cmd.OutOrStdout()
 	if _, err := veepkg.Ensure(cmd.Context(), out); err != nil {
@@ -303,7 +316,28 @@ func ensureVee(cmd *cobra.Command, useHost bool) bool {
 // the toolchain is present) or a fatal error guiding the user to install vee or
 // the toolchain. veeAvail reports whether vee is on PATH (it powers both the
 // docker and vm paths).
-func decideBuildMethod(useVM, useHost, useDocker, veeAvail, toolMissing bool) (buildMethod, error) {
+//
+// hostGOOS makes the mapping OS-aware (and testable). On macOS the container/VM
+// paths cannot emit a Mach-O binary (see dockerbuild.TargetForHost), so the
+// only build that yields a runnable engine is the host (Xcode) build: the
+// default is host rather than the doomed container path, and an explicit
+// --docker/--vm is rejected up front — before any vee download or source
+// extract — instead of failing deep inside the container build.
+func decideBuildMethod(useVM, useHost, useDocker, veeAvail, toolMissing bool, hostGOOS string) (buildMethod, error) {
+	if hostGOOS == "darwin" {
+		switch {
+		case useDocker:
+			return buildHost, fmt.Errorf("a macOS engine cannot be built in a container; drop --docker and build on this Mac (jk2coop setup --host) or use the 'jk2coop-macos' CI artifact")
+		case useVM:
+			return buildHost, fmt.Errorf("a macOS engine cannot be built in a Linux VM; drop --vm and build on this Mac (jk2coop setup --host) or use the 'jk2coop-macos' CI artifact")
+		}
+		// --host or no flag: the macOS default is a native host build.
+		if toolMissing {
+			return buildHost, fmt.Errorf("build toolchain missing:\n%s", prereq.Guidance(prereq.Missing()))
+		}
+		return buildHost, nil
+	}
+
 	switch {
 	case useHost:
 		if toolMissing {
